@@ -46,6 +46,7 @@ Duet-Symphony/
 │   ├── README.md          #   Reading guide for implementers
 │   └── SPEC.md            #   Normative spec v0.4.1
 ├── AGENTS.md              # Project handoff notes and implementation guidance
+├── IMPLEMENTATION.md      # Import strategy and implementation checkpoints
 ├── REVIEW.md              # Design review and risk backlog
 ├── README.md              # This file
 ├── LICENSE                # MIT
@@ -70,6 +71,7 @@ under `docs/superpowers/` for teams that want that SPEC/PLAN/REVIEW workflow.
 
 - [Specification](./spec/SPEC.md) — the normative design document
 - [Spec reading guide](./spec/README.md) — for implementers starting from scratch
+- [Implementation plan](./IMPLEMENTATION.md) — upstream import strategy and checkpoints
 - [Implementation guidance](./AGENTS.md) — next steps and constraints
 - [Design review](./REVIEW.md) — risk backlog from spec review
 - [OpenAI Symphony](https://github.com/openai/symphony) — upstream project
