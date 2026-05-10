@@ -37,7 +37,7 @@ adapted, and dropped.
 ## Standalone repository
 
 This is the standalone **Duet-Symphony** repository, seeded from the original
-`duet-llm/` design snapshot in the Bacos skills monorepo.
+design snapshot in the Bacos skills monorepo.
 
 ## Reading order
 
@@ -52,6 +52,7 @@ This is the standalone **Duet-Symphony** repository, seeded from the original
 
 ```
 Duet-Symphony/
+├── AGENTS.md
 ├── README.md
 ├── SPEC.md
 ├── LICENSE
