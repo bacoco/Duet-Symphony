@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.RunnerSelectorTest do
   use SymphonyElixir.TestSupport
 
-  alias SymphonyElixir.Duet.{EventLog, RoutingSelection}
+  alias SymphonyElixir.Duet.{EventLog, RoutingSelection, Transcripts}
   alias SymphonyElixir.Duet.PairRunner
   alias SymphonyElixir.RunnerSelector
 
@@ -110,8 +110,7 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       assert task_failed["kind"] == "task_failed"
       assert task_failed["reason"] == "reviewer_not_implemented"
 
-      assert {:ok, transcript} =
-               SymphonyElixir.Duet.Transcripts.read(issue, "SPEC", 1, "codex")
+      assert {:ok, transcript} = Transcripts.read(issue, "SPEC", 1, "codex")
 
       assert transcript =~ "[DUET SPEC TURN]"
       assert transcript =~ "Draft SPEC content."

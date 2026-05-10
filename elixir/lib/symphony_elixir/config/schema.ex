@@ -205,6 +205,9 @@ defmodule SymphonyElixir.Config.Schema do
     import Ecto.Changeset
 
     alias SymphonyElixir.Duet.Routing
+    alias SymphonyElixir.Duet.SuperPower
+    alias SymphonyElixir.Duet.ToolProfile
+    alias SymphonyElixir.Duet.VerificationGate
 
     @primary_key false
     embedded_schema do
@@ -225,6 +228,43 @@ defmodule SymphonyElixir.Config.Schema do
           "timeout_ms" => nil
         }
       )
+
+      field(:tool_profiles, :map,
+        default: %{
+          "enabled" => false,
+          "default_profile" => "default",
+          "profiles" => %{
+            "default" => %{
+              "spec" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+              "plan" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+              "code" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+              "review" => %{"coder_ack" => "all", "reviewer" => "all"}
+            }
+          }
+        }
+      )
+
+      field(:verification_gate, :map,
+        default: %{
+          "enabled" => false,
+          "phases" => ["code"],
+          "mode" => "github_checks",
+          "github_checks" => %{"required_contexts" => [], "timeout_ms" => 300_000},
+          "local_command" => %{"run" => nil, "timeout_ms" => 300_000},
+          "inject_into" => "reviewer",
+          "on_timeout" => "warn"
+        }
+      )
+
+      field(:superpower, :map,
+        default: %{
+          "enabled" => false,
+          "root" => "docs/superpowers",
+          "mode" => "mirror",
+          "phases" => %{"spec" => true, "plan" => true, "code" => false, "review" => true},
+          "require_plan_checkboxes" => true
+        }
+      )
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -239,13 +279,19 @@ defmodule SymphonyElixir.Config.Schema do
         :pause_on_freeze,
         :agent_menu,
         :agent_routing,
-        :human_checkpoints
+        :human_checkpoints,
+        :tool_profiles,
+        :verification_gate,
+        :superpower
       ])
       |> validate_number(:max_cycles_per_phase, greater_than: 0)
       |> validate_number(:phase_turn_timeout_ms, greater_than: 0)
       |> validate_number(:phase_total_timeout_ms, greater_than: 0)
       |> validate_inclusion(:code_phase_cap_policy, ["escalate", "forced", "fail"])
       |> validate_agent_routing()
+      |> validate_tool_profiles()
+      |> validate_verification_gate()
+      |> validate_superpower()
     end
 
     defp validate_agent_routing(changeset) do
@@ -253,6 +299,33 @@ defmodule SymphonyElixir.Config.Schema do
         case Routing.validate_config(agent_routing) do
           :ok -> []
           {:error, message} -> [agent_routing: message]
+        end
+      end)
+    end
+
+    defp validate_tool_profiles(changeset) do
+      validate_change(changeset, :tool_profiles, fn :tool_profiles, tool_profiles ->
+        case ToolProfile.validate_config(tool_profiles) do
+          :ok -> []
+          {:error, message} -> [tool_profiles: message]
+        end
+      end)
+    end
+
+    defp validate_verification_gate(changeset) do
+      validate_change(changeset, :verification_gate, fn :verification_gate, verification_gate ->
+        case VerificationGate.validate_config(verification_gate) do
+          :ok -> []
+          {:error, message} -> [verification_gate: message]
+        end
+      end)
+    end
+
+    defp validate_superpower(changeset) do
+      validate_change(changeset, :superpower, fn :superpower, superpower ->
+        case SuperPower.validate_config(superpower) do
+          :ok -> []
+          {:error, message} -> [superpower: message]
         end
       end)
     end

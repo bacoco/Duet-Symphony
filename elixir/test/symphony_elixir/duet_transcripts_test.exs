@@ -120,21 +120,22 @@ defmodule SymphonyElixir.DuetTranscriptsTest do
     -----END PRIVATE KEY-----
     """
 
-    prompt = "api_key: sk-test-secret\nAWS key AKIA1234567890ABCDEF"
-    response = "token=ghp_secret\n#{pem}"
+    prompt = "api_key: sk-test-secret-value-1234567890\nAWS key AKIA1234567890ABCDEF"
+    response = "token=ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n#{pem}"
 
     assert {:ok, path} =
              Transcripts.write("TASK-REDACT", "CODE", 1, "codex", prompt, response)
 
     contents = File.read!(path)
 
-    refute contents =~ "sk-test-secret"
+    refute contents =~ "sk-test-secret-value-1234567890"
     refute contents =~ "AKIA1234567890ABCDEF"
-    refute contents =~ "ghp_secret"
+    refute contents =~ "ghp_aaaaaaaa"
     refute contents =~ "abc123"
-    assert contents =~ "[REDACTED_SECRET]"
-    assert contents =~ "[REDACTED_AWS_ACCESS_KEY]"
-    assert contents =~ "[REDACTED_PEM_PRIVATE_KEY]"
+    assert contents =~ "[REDACTED:generic_token]"
+    assert contents =~ "[REDACTED:aws_access_key]"
+    assert contents =~ "[REDACTED:pem_private_key]"
+    assert contents =~ "[REDACTED:github_token]"
   end
 
   test "write/6 overwrites a previous transcript at the same path" do

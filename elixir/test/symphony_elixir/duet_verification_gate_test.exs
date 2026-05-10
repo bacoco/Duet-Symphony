@@ -193,4 +193,102 @@ defmodule SymphonyElixir.DuetVerificationGateTest do
       assert VerificationGate.end_marker() == "---END-DUET-VERIFICATION---"
     end
   end
+
+  describe "validate_config/1" do
+    test "empty map is :ok" do
+      assert :ok = VerificationGate.validate_config(%{})
+    end
+
+    test "non-map input is :error" do
+      assert {:error, message} = VerificationGate.validate_config(:not_a_map)
+      assert message =~ "verification_gate must be a map"
+    end
+
+    test "spec §12 default config is :ok" do
+      default_config = %{
+        "enabled" => false,
+        "phases" => ["code"],
+        "mode" => "github_checks",
+        "github_checks" => %{"required_contexts" => [], "timeout_ms" => 300_000},
+        "local_command" => %{"run" => nil, "timeout_ms" => 300_000},
+        "inject_into" => "reviewer",
+        "on_timeout" => "warn"
+      }
+
+      assert :ok = VerificationGate.validate_config(default_config)
+    end
+
+    test "non-boolean enabled is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"enabled" => "yes"})
+      assert message =~ "verification_gate.enabled"
+    end
+
+    test "phases not a list is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"phases" => "code"})
+      assert message =~ "verification_gate.phases"
+    end
+
+    test "phases containing an unknown phase is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"phases" => ["code", "deploy"]})
+      assert message =~ "verification_gate.phases"
+      assert message =~ "deploy"
+    end
+
+    test "mode not in allowed values is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"mode" => "bogus"})
+      assert message =~ "verification_gate.mode"
+      assert message =~ "bogus"
+    end
+
+    test "inject_into not in allowed values is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"inject_into" => "author"})
+      assert message =~ "verification_gate.inject_into"
+      assert message =~ "author"
+    end
+
+    test "on_timeout not in allowed values is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"on_timeout" => "ignore"})
+      assert message =~ "verification_gate.on_timeout"
+      assert message =~ "ignore"
+    end
+
+    test "github_checks.required_contexts not a list is :error" do
+      config = %{"github_checks" => %{"required_contexts" => "ci/tests"}}
+      assert {:error, message} = VerificationGate.validate_config(config)
+      assert message =~ "verification_gate.github_checks.required_contexts"
+    end
+
+    test "github_checks.timeout_ms non-positive is :error" do
+      config = %{"github_checks" => %{"timeout_ms" => 0}}
+      assert {:error, message} = VerificationGate.validate_config(config)
+      assert message =~ "verification_gate.github_checks.timeout_ms"
+    end
+
+    test "local_command.run non-nil-non-binary is :error" do
+      config = %{"local_command" => %{"run" => 123}}
+      assert {:error, message} = VerificationGate.validate_config(config)
+      assert message =~ "verification_gate.local_command.run"
+    end
+
+    test "local_command.run nil is :ok" do
+      config = %{"local_command" => %{"run" => nil}}
+      assert :ok = VerificationGate.validate_config(config)
+    end
+
+    test "local_command.timeout_ms non-positive is :error" do
+      config = %{"local_command" => %{"timeout_ms" => -1}}
+      assert {:error, message} = VerificationGate.validate_config(config)
+      assert message =~ "verification_gate.local_command.timeout_ms"
+    end
+
+    test "github_checks not a map is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"github_checks" => "ci"})
+      assert message =~ "verification_gate.github_checks"
+    end
+
+    test "local_command not a map is :error" do
+      assert {:error, message} = VerificationGate.validate_config(%{"local_command" => "npm test"})
+      assert message =~ "verification_gate.local_command"
+    end
+  end
 end

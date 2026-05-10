@@ -15,12 +15,8 @@ defmodule SymphonyElixir.Duet.Transcripts do
   `trailer_rejected` events plus subsequent `turn_response` entries.
   """
 
-  alias SymphonyElixir.Duet.EventLog
+  alias SymphonyElixir.Duet.{CredentialRedaction, EventLog}
   alias SymphonyElixir.Linear.Issue
-
-  @aws_access_key_pattern ~r/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
-  @pem_private_key_pattern ~r/-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----/s
-  @generic_secret_pattern ~r/(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|token)\b\s*[:=]\s*["']?[^"'\s]+["']?/
 
   @type write_result :: {:ok, Path.t()} | {:error, term()}
 
@@ -75,13 +71,8 @@ defmodule SymphonyElixir.Duet.Transcripts do
   """
   @spec redact(String.t()) :: String.t()
   def redact(text) when is_binary(text) do
-    text
-    |> redact_pattern(@pem_private_key_pattern, "[REDACTED_PEM_PRIVATE_KEY]")
-    |> redact_pattern(@aws_access_key_pattern, "[REDACTED_AWS_ACCESS_KEY]")
-    |> redact_pattern(@generic_secret_pattern, "[REDACTED_SECRET]")
+    CredentialRedaction.redact(text)
   end
-
-  defp redact_pattern(text, pattern, replacement), do: Regex.replace(pattern, text, replacement)
 
   defp render(task_id, phase, cycle, actor, prompt, response) do
     redacted_prompt = redact(prompt)

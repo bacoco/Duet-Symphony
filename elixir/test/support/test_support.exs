@@ -44,8 +44,11 @@ defmodule SymphonyElixir.TestSupport do
           Application.delete_env(:symphony_elixir, :server_port_override)
           Application.delete_env(:symphony_elixir, :duet_event_log_root)
           Application.delete_env(:symphony_elixir, :duet_selected_routing_profile)
+          Application.delete_env(:symphony_elixir, :duet_per_task_routing_profile)
           Application.delete_env(:symphony_elixir, :duet_claude_github_identity)
           Application.delete_env(:symphony_elixir, :duet_codex_github_identity)
+          Application.delete_env(:symphony_elixir, :duet_gh_cli_runner)
+          Application.delete_env(:symphony_elixir, :duet_notification_hook_runner)
           Application.delete_env(:symphony_elixir, :memory_tracker_issues)
           Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
           File.rm_rf(workflow_root)
@@ -121,6 +124,9 @@ defmodule SymphonyElixir.TestSupport do
           codex_stall_timeout_ms: 300_000,
           duet_yaml: nil,
           duet_enabled: nil,
+          tool_profiles_yaml: nil,
+          verification_gate_yaml: nil,
+          superpower_yaml: nil,
           hook_after_create: nil,
           hook_before_run: nil,
           hook_after_run: nil,
@@ -160,6 +166,9 @@ defmodule SymphonyElixir.TestSupport do
     codex_stall_timeout_ms = Keyword.get(config, :codex_stall_timeout_ms)
     duet_raw_yaml = Keyword.get(config, :duet_yaml)
     duet_enabled = Keyword.get(config, :duet_enabled)
+    tool_profiles_yaml = Keyword.get(config, :tool_profiles_yaml)
+    verification_gate_yaml = Keyword.get(config, :verification_gate_yaml)
+    superpower_yaml = Keyword.get(config, :superpower_yaml)
     hook_after_create = Keyword.get(config, :hook_after_create)
     hook_before_run = Keyword.get(config, :hook_before_run)
     hook_after_run = Keyword.get(config, :hook_after_run)
@@ -201,7 +210,7 @@ defmodule SymphonyElixir.TestSupport do
         "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
         "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
-        duet_yaml(duet_raw_yaml, duet_enabled),
+        duet_yaml(duet_raw_yaml, duet_enabled, tool_profiles_yaml, verification_gate_yaml, superpower_yaml),
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
@@ -265,16 +274,33 @@ defmodule SymphonyElixir.TestSupport do
     |> Enum.join("\n")
   end
 
-  defp duet_yaml(raw_yaml, _enabled) when is_binary(raw_yaml), do: String.trim_trailing(raw_yaml)
+  defp duet_yaml(raw_yaml, _enabled, _tool_profiles, _verification_gate, _superpower)
+       when is_binary(raw_yaml),
+       do: String.trim_trailing(raw_yaml)
 
-  defp duet_yaml(_raw_yaml, nil), do: nil
+  defp duet_yaml(_raw_yaml, nil, nil, nil, nil), do: nil
 
-  defp duet_yaml(_raw_yaml, enabled) do
+  defp duet_yaml(_raw_yaml, enabled, tool_profiles, verification_gate, superpower) do
+    enabled_line = if is_nil(enabled), do: nil, else: "  enabled: #{yaml_value(enabled)}"
+
     [
       "duet:",
-      "  enabled: #{yaml_value(enabled)}"
+      enabled_line,
+      indent_block(tool_profiles, "  "),
+      indent_block(verification_gate, "  "),
+      indent_block(superpower, "  ")
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
+  end
+
+  defp indent_block(nil, _indent), do: nil
+
+  defp indent_block(raw_yaml, indent) when is_binary(raw_yaml) do
+    raw_yaml
+    |> String.trim_trailing()
+    |> String.split("\n")
+    |> Enum.map_join("\n", &(indent <> &1))
   end
 
   defp observability_yaml(enabled, refresh_ms, render_interval_ms) do

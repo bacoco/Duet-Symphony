@@ -98,7 +98,10 @@ as the artifact and convergence substrate.
   (SPEC/PLAN forced freeze, CODE escalate/forced/fail policies, plus
   operator override resolution); `Duet.PathologicalDisagreement.detect/1`
   flags three consecutive cycles with equal `unresolved` after
-  normalization (§10.5); `Duet.Identity` resolves per-actor GitHub
+  normalization (§10.5); `Duet.ConvergenceOrchestrator` combines these
+  into the pure next-action decision (`freeze`, `continue`,
+  `awaiting_operator`, `fail`) for the future phase driver;
+  `Duet.Identity` resolves per-actor GitHub
   identities from app env / `DUET_*_GITHUB_IDENTITY` env vars and
   validates the §9.3 distinct-identity requirement (`Config.Schema`
   wiring is a future slice); `Duet.PhaseSummary` provides the v1 §8.4
@@ -115,7 +118,9 @@ as the artifact and convergence substrate.
   `allows?/5`, `validate_config/1`, `known_tools/0` for the §17
   implementation-defined identifier set); `Duet.VerificationGate`
   provides the §8.7 data layer (`aggregate_status/1`, `build_block/2`,
-  `timeout_block/1`). None wired into PairRunner yet.
+  `timeout_block/1`, `validate_config/1`). `Config.Schema.Duet` now
+  parses and validates `tool_profiles`, `verification_gate`, and
+  `superpower`. None wired into PairRunner yet.
 - The operator-gate + GitHub-integration pure helpers are in place:
   `Duet.AwaitingOperator` enumerates the 7 spec-defined
   `awaiting_operator` reasons and translates each (reason, decision)
@@ -130,8 +135,14 @@ as the artifact and convergence substrate.
   `<root>/<specs|plans|code|reviews>/<task_id>.md` paths.
   `Duet.PRConflict` decides §8.3.1 mergeability of the held-open
   CODE PR with `:mergeable` / `{:conflict, ...}` / `{:retry_later, ...}`
-  results and builds the `code_pr_conflict` event payload. None wired
-  into PairRunner yet.
+  results and builds the `code_pr_conflict` event payload. `Duet.GhCli`
+  is a pure argv-building wrapper around `gh` for PR open/ready/merge,
+  author comments, reviewer reviews, review listing, and mergeability.
+  `Duet.RoutingOverride` adds per-task routing overrides with
+  `routing_override_applied` events. `Duet.NotificationHook` defines the
+  no-op default hook surface for operator/failure notifications.
+  `Duet.CredentialRedaction` centralizes §14 transcript redaction and is
+  used by `Duet.Transcripts`. None wired into PairRunner yet.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -230,6 +241,11 @@ Completed first slice:
     Author turn through `PairRunner` for profiles whose SPEC Author is
     `codex`; the runner now records request/response events and
     transcripts for that one turn, then stops before the missing reviewer.
+22. Finish the remaining wave-6 pure helpers: v0.4 config schema wiring,
+    centralized §14 credential redaction, `ConvergenceOrchestrator`,
+    per-task routing overrides, `gh` CLI wrapper, and notification hook
+    surface. Still no PairRunner wiring beyond the existing Codex SPEC
+    Author half-turn.
 
 Next slice:
 

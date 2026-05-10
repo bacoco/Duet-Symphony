@@ -460,6 +460,12 @@ orchestrator wiring or GitHub I/O.
   three consecutive cycles whose `unresolved` lists are equal after
   normalization (trim, whitespace collapse, lowercase, drop empty,
   uniq, sort) per §10.5.
+- `SymphonyElixir.Duet.ConvergenceOrchestrator.decide/1` combines
+  `Convergence.evaluate/1`, `PathologicalDisagreement.detect/1`, and
+  `CycleCap.tie_breaker/3` into a pure next-action decision for the
+  future phase driver. It returns normal convergence freeze, continue,
+  `{:awaiting_operator, :phase_cap_escalation}`, forced freeze, or fail
+  tuples without performing any event-log or GitHub I/O.
 - `SymphonyElixir.Duet.Identity` resolves per-actor GitHub identities
   (claude / codex) from app-env overrides or `DUET_*_GITHUB_IDENTITY`
   environment variables, and validates the §9.3 distinct-identity
@@ -473,6 +479,23 @@ orchestrator wiring or GitHub I/O.
   marker). It feeds `Duet.PhaseFreezeMessage.summary_word_target/2`.
 - No agent runtime, GitHub call, or new event kind is introduced in
   these slices. They are pure helpers consumed by the pair-loop slice.
+
+## Security + v0.4 Config Wiring Status
+
+The remaining v0.4 config and security helpers are complete.
+
+- `Config.Schema.Duet` now parses and validates `tool_profiles`,
+  `verification_gate`, and `superpower` config blocks in addition to
+  the earlier core routing fields. Validation delegates to the pure
+  resolver modules (`ToolProfile.validate_config/1`,
+  `VerificationGate.validate_config/1`, `SuperPower.validate_config/1`).
+- `SymphonyElixir.Duet.CredentialRedaction` centralizes §14 transcript
+  redaction for AWS access keys and secret-style values, PEM blocks,
+  GitHub tokens, generic API/token/password fields, JWT-shaped strings,
+  and Slack tokens.
+- `SymphonyElixir.Duet.Transcripts.redact/1` delegates to
+  `CredentialRedaction.redact/1`, so per-turn transcript prompt/response
+  persistence uses the expanded §14 redaction set.
 
 ## Phase Pipeline + v0.4 Opt-In Helpers Status
 
@@ -510,9 +533,8 @@ loop. None are wired into the orchestrator or any agent runtime yet.
   `{:error, ...}` for unknown profile/phase/role/tool), including the
   SPEC/PLAN/CODE `author` + `reviewers.default` / actor override shape,
   `allows?/5`, `validate_config/1`. The §17 implementation-defined
-  tool identifier set is exposed via `known_tools/0`. Schema wiring
-  for `Config.Schema.Duet.tool_profiles` is intentionally a future
-  slice; this module operates on the raw config map.
+  tool identifier set is exposed via `known_tools/0`. `Config.Schema`
+  now delegates validation to this module.
 - `SymphonyElixir.Duet.VerificationGate` provides the spec §8.7
   data layer: `aggregate_status/1` (combines per-check statuses with
   all-timeout → `:timeout`, timeout mixed with completed checks →
@@ -521,7 +543,8 @@ loop. None are wired into the orchestrator or any agent runtime yet.
   the §8.7 example shape with escaped name/summary fields),
   `timeout_block/1` (synthetic timeout block for §8.7 step 2), and
   `start_marker/0` / `end_marker/0` constants. CI execution / GitHub
-  status polling is a future orchestrator slice.
+  `validate_config/1` checks the config shape used by `Config.Schema`.
+  CI execution / GitHub status polling is a future orchestrator slice.
 - None of these slices touches an agent runtime, opens a PR, or
   emits new event kinds. They form the pure substrate that the
   upcoming orchestrator wiring slices will consume.
@@ -560,8 +583,8 @@ and the §8.5 SuperPower artifact mode resolver.
   `phase_enabled?/2`, `artifact_path/3` (returns
   `<root>/<specs|plans|code|reviews>/<sanitized_task_id>.md`),
   `template_check/2` (v1 stub returning `:ok`), and
-  `validate_config/1`. `Config.Schema` wiring is intentionally
-  deferred.
+  `validate_config/1`. `Config.Schema` now delegates validation to this
+  module.
 - `SymphonyElixir.Duet.PRConflict` decides the §8.3.1 mergeability of
   the held-open CODE PR via `evaluate/1`, returning `:mergeable`,
   `{:conflict, %{paths, base_head}}`, or
@@ -571,6 +594,29 @@ and the §8.5 SuperPower artifact mode resolver.
 - None of these slices touches an agent runtime, opens a PR, or emits
   new event kinds. They are pure helpers for the upcoming
   orchestrator wiring.
+
+## Routing Override, GitHub CLI, and Notification Hook Status
+
+The remaining wave-6 operator integration helpers are complete. They do not
+perform orchestrator state transitions themselves.
+
+- `SymphonyElixir.Duet.RoutingOverride` implements per-task routing
+  overrides above the runtime-global `RoutingSelection`. It stores the
+  selected profile in application env keyed by task id, records
+  `routing_override_applied` with the effective phase matrix and source,
+  rolls back app env if event logging fails, and auto-clears stale profile
+  names when `WORKFLOW.md` no longer declares them.
+- `SymphonyElixir.Duet.GhCli` builds typed `gh` argv for opening PRs,
+  marking draft PRs ready, merging PRs, posting Author trailer comments,
+  submitting Reviewer reviews, listing reviews, and reading PR
+  mergeability. It delegates execution to `GhCli.Runner`; the default
+  `GhCli.SystemRunner` shells out to `gh`, while tests inject a mock.
+- `SymphonyElixir.Duet.NotificationHook` defines the notification hook
+  surface for phase-cap escalations, pathological disagreement, CODE PR
+  conflicts, state divergence, human checkpoint timeout, verification
+  timeout, SuperPower artifact failures, and missing bot integration.
+  The default `NotificationHook.NullRunner` is a no-op; concrete Slack /
+  HTTP / exec runners are future optional adapters.
 
 ## Local Modifications Inside elixir/
 
@@ -586,7 +632,7 @@ this section in sync with the modifications applied per slice.
 | `mix.exs` | routing config slice | escript `name` and `path` renamed `symphony` → `duet-symphony`; operational runner/routing modules added to coverage ignore list like `AgentRunner`/`Workspace` |
 | `lib/symphony_elixir/cli.ex` | first runner slice | usage message updated to new binary name |
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
-| `lib/symphony_elixir/config/schema.ex` | routing config slice | added embedded `Duet` schema with core phase/routing fields and routing validation |
+| `lib/symphony_elixir/config/schema.ex` | v0.4 config wiring slice | added embedded `Duet` schema with core phase/routing fields plus `tool_profiles`, `verification_gate`, and `superpower` config validation |
 | `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
 | `lib/symphony_elixir_web/controllers/observability_api_controller.ex` | routing menu slice | adds Duet routing profile GET/POST endpoints |
 | `lib/symphony_elixir_web/live/dashboard_live.ex` | routing menu slice | renders the operator Duet routing profile select and phase matrix |
@@ -594,7 +640,7 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir_web/router.ex` | routing menu slice | routes `/api/v1/duet/routing` before issue detail routes |
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `priv/static/dashboard.css` | routing menu slice | styles the Duet routing select, metadata row, and phase table |
-| `test/support/test_support.exs` | identity slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures; clears runtime routing profile selection and Duet GitHub identity overrides between tests |
+| `test/support/test_support.exs` | v0.4 config/helper slices | added `duet_yaml` helper for emitting simple/raw/nested `duet:` blocks in test config fixtures; clears runtime routing/profile/identity/GhCli/notification hook overrides between tests |
 | `test/symphony_elixir/extensions_test.exs` | routing menu slice | covers routing API payload, profile selection, and dashboard form behavior |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
 | `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows near lines 562 and 604 after the same upstream timing flake failed on pinned GitHub Actions run `25628886607` |
@@ -618,7 +664,12 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/phase_freeze_message.ex`
 - `lib/symphony_elixir/duet/transcripts.ex`
 - `lib/symphony_elixir/duet/convergence.ex`
+- `lib/symphony_elixir/duet/convergence_orchestrator.ex`
 - `lib/symphony_elixir/duet/cycle_cap.ex`
+- `lib/symphony_elixir/duet/credential_redaction.ex`
+- `lib/symphony_elixir/duet/gh_cli.ex`
+- `lib/symphony_elixir/duet/gh_cli/runner.ex`
+- `lib/symphony_elixir/duet/gh_cli/system_runner.ex`
 - `lib/symphony_elixir/duet/pathological_disagreement.ex`
 - `lib/symphony_elixir/duet/identity.ex`
 - `lib/symphony_elixir/duet/phase_summary.ex`
@@ -630,7 +681,11 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/awaiting_operator.ex`
 - `lib/symphony_elixir/duet/pr.ex`
 - `lib/symphony_elixir/duet/pr_conflict.ex`
+- `lib/symphony_elixir/duet/notification_hook.ex`
+- `lib/symphony_elixir/duet/notification_hook/runner.ex`
+- `lib/symphony_elixir/duet/notification_hook/null_runner.ex`
 - `lib/symphony_elixir/duet/github_review.ex`
+- `lib/symphony_elixir/duet/routing_override.ex`
 - `lib/symphony_elixir/duet/super_power.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/duet_event_log_test.exs`
@@ -645,7 +700,12 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_phase_freeze_message_test.exs`
 - `test/symphony_elixir/duet_transcripts_test.exs`
 - `test/symphony_elixir/duet_convergence_test.exs`
+- `test/symphony_elixir/duet_convergence_orchestrator_test.exs`
 - `test/symphony_elixir/duet_cycle_cap_test.exs`
+- `test/symphony_elixir/duet_credential_redaction_test.exs`
+- `test/symphony_elixir/duet_gh_cli_test.exs`
+- `test/symphony_elixir/duet_notification_hook_test.exs`
+- `test/symphony_elixir/duet_config_v04_test.exs`
 - `test/symphony_elixir/duet_pathological_disagreement_test.exs`
 - `test/symphony_elixir/duet_identity_test.exs`
 - `test/symphony_elixir/duet_phase_summary_test.exs`
@@ -658,6 +718,7 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_pr_test.exs`
 - `test/symphony_elixir/duet_pr_conflict_test.exs`
 - `test/symphony_elixir/duet_github_review_test.exs`
+- `test/symphony_elixir/duet_routing_override_test.exs`
 - `test/symphony_elixir/duet_super_power_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
