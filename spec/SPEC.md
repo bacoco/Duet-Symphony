@@ -136,6 +136,7 @@ without a spec amendment:
 | **Cycle** | One Author → Reviewer round-trip within a phase. |
 | **Convergence** | Both agents emit `APPROVE` for the same revision of the artifact in the same cycle. |
 | **Phase Freeze** | The point at which a phase's artifact is locked and the next phase can begin. SPEC/PLAN freeze by merging their phase PRs; CODE freezes without merge so REVIEW can run on the held-open CODE PR. |
+| **Human checkpoint** | Optional operator gate at the end of a phase. It may approve, request changes, or fail the task, but it is not a machine convergence signal unless the routing profile explicitly replaces a binding role with `human` in degraded mode. |
 | **SuperPower artifacts** | Optional human-facing SPEC, PLAN, and REVIEW documents following the SuperPower artifact conventions, normally under `docs/superpowers/{specs,plans,reviews}`. |
 | **Workspace** | A Symphony-style isolated filesystem directory assigned to one issue/task. It may contain a clone, git worktree, or other repository copy. |
 | **Agent runtime** | A Claude or Codex execution backend, such as Codex App Server, Codex Cloud, Claude Code print/resume, or a GitHub bot. |
@@ -501,6 +502,10 @@ apply:
   approves a configuration update.
 - Invalid profiles MUST be rejected during configuration validation (§12.1)
   before a tracker task is claimed.
+- Human checkpoints MAY be attached per phase as an additional operator gate.
+  A checkpoint does not make a profile degraded when Claude and Codex still
+  provide the binding §10.2 signals; it is a third approval layer, not a
+  replacement for machine convergence.
 
 Example: an operator MAY select Codex as SPEC Author with Claude as SPEC
 Reviewer, then skip Claude for PLAN review and bring it back for CODE review.
@@ -586,6 +591,14 @@ On freeze, behavior depends on phase:
 1. Orchestrator merges the CODE PR into `duet-base/<task_id>`.
 2. Orchestrator deletes the CODE sub-branch.
 3. Orchestrator emits a *phase-freeze* message and a `task_completed` event.
+
+**Human checkpoint gate.** When a blocking human checkpoint is enabled for the
+current phase (§8.6), it runs after machine convergence or tie-breaker
+selection, but before the phase-specific freeze side effects above. For
+SPEC/PLAN this means before the phase PR is merged; for CODE this means before
+the CODE PR is marked frozen for REVIEW; for REVIEW this means before the CODE
+PR is merged. The task transitions to `awaiting_operator` with
+`reason = human_checkpoint` until the operator resolves the checkpoint.
 
 **Operator pause gate.** When `duet.pause_on_freeze` is `true`, the
 orchestrator MUST transition the task to `awaiting_operator` with
@@ -697,6 +710,36 @@ for that task, accept the invalid artifact as an override, or fail the task.
 The effective SuperPower setting for a task MUST be logged at task start. If
 an implementation imports templates or skills from a SuperPower repository, it
 MUST document the source and version in its §17 implementation-defined notes.
+
+### 8.6 Optional human checkpoints
+
+Human checkpoints are optional operator gates that can be enabled per phase.
+They are intended for workflows where a human wants to inspect the frozen SPEC,
+PLAN, CODE diff, or final REVIEW outcome before Duet proceeds.
+
+When a blocking human checkpoint is enabled for a phase:
+
+1. The orchestrator waits for machine convergence or a configured tie-breaker.
+2. Before applying the phase freeze side effects (§8.3), it emits
+   `human_checkpoint_requested` with the phase, artifact link, tree hash,
+   routing profile, convergence mode, and summary.
+3. The task transitions to `awaiting_operator` with
+   `reason = human_checkpoint`.
+4. The operator resolves the checkpoint with one of:
+   - `approve` — continue the freeze flow.
+   - `request_changes` — resume the producing phase with the human feedback
+     appended to the next Author prompt. For REVIEW, this returns to CODE
+     because the final artifact being rejected is the CODE PR.
+   - `fail` — mark the task failed with `reason = human_rejected`.
+
+Human checkpoints are additive. A full Duet run with Claude and Codex binding
+signals plus human checkpoint approval remains `full_duet`; the human approval
+is recorded as an additional gate, not as one of the two §10.2 convergence
+signals. A profile becomes degraded only when `human` replaces a binding
+machine role such as Author, Reviewer, or REVIEW reviewer.
+
+An advisory human checkpoint MAY be logged without blocking the task, but the
+default checkpoint mode is blocking when a phase is enabled.
 
 ---
 
@@ -975,6 +1018,8 @@ deadlock.
 | Cycle cap reached (CODE, override) | Operator set `code_phase_cap_policy: forced` or `fail` | Apply chosen override (§10.4.2) |
 | Pathological disagreement | §10.5 detector | Mark task `failed` |
 | SuperPower artifact invalid | `duet.superpower.mode = enforce` and template checks still fail at cycle cap | Transition to `awaiting_operator` with `reason = superpower_artifact_invalid`; emit `superpower_artifact_rejected`; await operator override, enforcement disable, or fail (§8.5) |
+| Human checkpoint pending | Blocking human checkpoint enabled for phase | Transition to `awaiting_operator` with `reason = human_checkpoint`; await approve, request changes, or fail (§8.6) |
+| Human checkpoint timeout | `human_checkpoints.timeout_ms` exceeded | Keep task in `awaiting_operator` and emit notification; do not auto-approve |
 | Context exhaustion | Agent runtime signal or sentinel | Restart/fork runtime with recovery message; not a task failure |
 | Orchestrator restart | Process exit | Reconstruct state from event log, PRs, and branch tips; resume from last frozen phase when possible; discard only non-frozen mid-phase work |
 | External branch modification | `duet-base` HEAD differs from expected | Detect at next phase transition or REVIEW merge; transition to `awaiting_operator` with `reason = code_pr_conflict` (§8.3.1) |
@@ -1107,6 +1152,15 @@ duet:
       code: false
       review: true
     require_plan_checkboxes: true
+  human_checkpoints:
+    enabled: true
+    default_mode: blocking            # blocking | advisory
+    phases:
+      spec: false
+      plan: false
+      code: false
+      review: false
+    timeout_ms: null                  # null = wait indefinitely
   branch:
     base_prefix: duet-base
     phase_prefix: duet-phase
@@ -1159,6 +1213,8 @@ Agent routing validation rules:
 - If `duet.superpower.mode = enforce`, the implementation MUST validate that
   the configured template checks for enabled phases are available before
   dispatch.
+- If `duet.human_checkpoints.enabled` is `true`, each configured phase value
+  MUST be boolean and `default_mode` MUST be `blocking` or `advisory`.
 
 `duet config validate` MUST report the profile name, phase, and role that
 caused each validation error.
@@ -1205,7 +1261,8 @@ Event `kind` values: `task_queued`, `task_started`, `workspace_created`,
 `phase_cap_escalation`, `trailer_rejected`, `low_confidence_approve`,
 `code_pr_conflict`, `state_divergence`, `agent_routing_selected`,
 `routing_override_applied`, `superpower_artifact_written`,
-`superpower_artifact_rejected`.
+`superpower_artifact_rejected`, `human_checkpoint_requested`,
+`human_checkpoint_resolved`.
 
 ### 13.2 Per-turn transcripts
 
@@ -1223,8 +1280,10 @@ Implementations MAY expose:
 
 Task list and detail responses MUST expose the active profile name,
 conformance classification (`full_duet` or degraded), convergence mode, and
-degraded reason when present. A task may remain in ordinary `completed` state
-after a degraded run, but the API/dashboard MUST make the distinction visible.
+degraded reason when present. They MUST also expose human checkpoint state per
+phase (`disabled`, `pending`, `approved`, `changes_requested`, `failed`) when
+checkpoints are enabled. A task may remain in ordinary `completed` state after
+a degraded run, but the API/dashboard MUST make the distinction visible.
 
 A web dashboard is permitted but optional.
 
@@ -1245,6 +1304,8 @@ The menu MUST allow the operator to:
   task starts.
 - Override, per phase, the Author, Reviewer(s), REVIEW coder acknowledgement,
   and any skipped actors.
+- Toggle blocking or advisory human checkpoints per phase, including SPEC,
+  PLAN, CODE, and REVIEW.
 - Toggle optional SuperPower artifact mode for the task when supported.
 - See whether the selected profile is `full_duet` or degraded, and why.
 - Confirm the effective routing before the first runtime turn is dispatched
@@ -1258,11 +1319,12 @@ When the setting is `true`, the task is in supervised dispatch mode and MUST
 remain unclaimed or `awaiting_operator` until the operator confirms routing.
 
 The UI MUST display the effective routing during task execution so operators
-can see where Claude and Codex are used. Completed degraded tasks MUST remain
-visibly labeled as degraded in task lists and detail pages. At task start, the
-orchestrator MUST emit `agent_routing_selected` with the profile name, phase
-matrix, conformance classification, and SuperPower settings. Per-task operator
-changes after selection MUST emit `routing_override_applied`.
+can see where Claude, Codex, and human checkpoints are used. Completed degraded
+tasks MUST remain visibly labeled as degraded in task lists and detail pages.
+At task start, the orchestrator MUST emit `agent_routing_selected` with the
+profile name, phase matrix, conformance classification, human checkpoint
+settings, and SuperPower settings. Per-task operator changes after selection
+MUST emit `routing_override_applied`.
 
 ---
 
@@ -1301,12 +1363,15 @@ duet logs --id <task_id> [--phase SPEC|PLAN|CODE|REVIEW] [--follow]
 duet config validate [path-to-WORKFLOW.md]
 duet profiles list
 duet profiles show <profile_name>
+duet checkpoint resolve --id <task_id> --phase SPEC|PLAN|CODE|REVIEW \
+  --decision approve|request_changes|fail [--feedback-file <path>]
 duet abandon --id <task_id>      # graceful: closes PRs if any, releases claim, removes workspace
 duet prune                       # deletes merged duet-base/* and duet-phase/* branches
 
 # Optional local/manual ingestion extension:
 duet run --id <task_id> --title "<...>" --description-file <path> \
-  [--profile duet_balanced|codex_led|codex_only_dev|...] [--superpower]
+  [--profile duet_balanced|codex_led|codex_only_dev|...] \
+  [--human-checkpoint spec,plan,code,review] [--superpower]
 ```
 
 ---
@@ -1330,7 +1395,8 @@ A conformant implementation MUST:
    tie-breaker, and pathological-disagreement rules (§10.2–§10.5).
 7. Implement an operator-selectable agent routing profile mechanism (§7.7)
    and clearly label degraded profiles that cannot satisfy full Duet
-   convergence without a second binding review.
+   convergence without a second binding review. The same operator surface MUST
+   support optional human checkpoints per phase (§8.6).
 8. Emit the structured event log (§13.1).
 9. Document its choices for any §17 implementation-defined item.
 
@@ -1356,6 +1422,9 @@ Each port MUST document its choice for the following:
 - **Agent routing profiles** shipped by default, which profiles are full Duet
   vs degraded, how per-task overrides are persisted, and how the operator UI
   or CLI exposes the initial selection menu.
+- **Human checkpoint policy**, including per-phase defaults, blocking vs
+  advisory behavior, timeout/notification behavior, and how human feedback is
+  injected into resumed agent turns.
 - **Runtime interaction mode** per agent (`codex_app_server`, `codex_cloud`,
   `codex_exec`, `claude_code_print`, `claude_code_stream`, `github_bot`, etc.).
 - **Bot integration handles and webhook vs polling** — applies only when

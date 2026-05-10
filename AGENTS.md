@@ -15,6 +15,9 @@ authors an artifact, the other reviews it, and the loop continues until both
 approve the same Git revision. Claude-only, Codex-only, and custom profiles are
 allowed for degraded/operator-assisted runs, but they do not satisfy full Duet
 convergence without a second binding review.
+- Human checkpoints are additive gates, not replacements for Claude/Codex
+  convergence. A full Duet run can still require human approval after SPEC,
+  PLAN, CODE, or REVIEW.
 
 This is not Council. Council is multi-model parallel deliberation; Duet's full
 mode is Claude and Codex in alternating author/reviewer roles with GitHub PRs
@@ -50,7 +53,8 @@ Duet patch set:
 3. Add a `duet_pair` runtime that coordinates Claude + Codex while emitting
    Symphony-compatible worker updates.
 4. Add the initial operator routing menu/UI so a task can choose Claude,
-   Codex, both, or a custom per-phase profile before dispatch.
+   Codex, both, human checkpoints, or a custom per-phase profile before
+   dispatch.
 5. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
    settings under a `duet:` front-matter key.
 6. Use Codex App Server for the Codex half first; add Codex Cloud as an

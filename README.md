@@ -15,7 +15,8 @@ dashboard/API, and autonomous handoff. The difference is the worker: instead of
 one Codex agent per task, each claimed task runs a strict Claude + Codex duet
 through `SPEC -> PLAN -> CODE -> REVIEW` until both agents converge on the same
 artifact/revision. Operators can also choose Claude-only, Codex-only, or
-custom per-phase routing profiles for degraded/local runs.
+custom per-phase routing profiles for degraded/local runs, and can add human
+checkpoints at the end of SPEC, PLAN, CODE, or REVIEW.
 
 ## Why a separate project
 
@@ -60,9 +61,9 @@ for the reading order.
 pair-runtime overlay) will live alongside `spec/` once development begins.
 `AGENTS.md` has the current implementation roadmap.
 
-The spec now also defines an initial operator routing menu and optional
-SuperPower-style artifacts under `docs/superpowers/` for teams that want that
-SPEC/PLAN/REVIEW workflow.
+The spec now also defines an initial operator routing menu, per-phase
+human-in-the-loop checkpoints, and optional SuperPower-style artifacts under
+`docs/superpowers/` for teams that want that SPEC/PLAN/REVIEW workflow.
 
 ## Quick links
 
