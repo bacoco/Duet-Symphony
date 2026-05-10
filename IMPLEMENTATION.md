@@ -187,8 +187,40 @@ The first slice is complete.
 - Verification after the slice: `mix format --check-formatted`, targeted unit
   tests, and full `mix test` all pass locally.
 
+> [!WARNING]
+> Do not enable `duet: enabled: true` in a production `WORKFLOW.md` until
+> the pair loop is implemented. While `Duet.PairRunner` is a stub, the
+> orchestrator dispatch wrapper raises on `{:error, :not_implemented}`,
+> which crashes the issue task and triggers the standard retry policy.
+> Every claimed issue will burn the retry budget without producing work.
+
 The next slice must extract or share `AgentRunner`'s workspace lifecycle before
 adding real Claude/Codex behavior to `Duet.PairRunner`.
+
+## Local Modifications Inside elixir/
+
+The files listed below carry Duet-specific deltas on top of the upstream
+baseline at SHA `58cf97da06d556c019ccea20c67f4f77da124bf3`. They will need
+three-way merge attention at each `git subtree pull --prefix=elixir`. Keep
+this section in sync with the modifications applied per slice.
+
+### Modified files (carry deltas vs upstream)
+
+| File | Slice | Reason |
+|------|-------|--------|
+| `mix.exs` | first runner slice | escript `name` and `path` renamed `symphony` → `duet-symphony` |
+| `lib/symphony_elixir/cli.ex` | first runner slice | usage message updated to new binary name |
+| `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
+| `lib/symphony_elixir/config/schema.ex` | first runner slice | added embedded `Duet` schema with `enabled` boolean field |
+| `test/support/test_support.exs` | first runner slice | added `duet_yaml` helper for emitting `duet:` blocks in test config fixtures |
+| `test/symphony_elixir/core_test.exs` | first runner slice | added two assertions covering `duet.enabled` defaulting and parsing |
+| `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
+
+### New Duet-only files (no upstream conflict expected)
+
+- `lib/symphony_elixir/runner_selector.ex`
+- `lib/symphony_elixir/duet/pair_runner.ex`
+- `test/symphony_elixir/runner_selector_test.exs`
 
 ## Baseline Test Status
 

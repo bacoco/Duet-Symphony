@@ -212,7 +212,7 @@ defmodule SymphonyElixir.Config.Schema do
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:enabled], empty_values: [])
+      |> cast(attrs, [:enabled])
     end
   end
 

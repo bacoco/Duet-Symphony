@@ -29,3 +29,9 @@ jobs:
       - name: Run tests
         working-directory: elixir
         run: mix test
+      - name: Build escript and verify rename
+        working-directory: elixir
+        run: |
+          mix build
+          test -x bin/duet-symphony
+          test ! -e bin/symphony

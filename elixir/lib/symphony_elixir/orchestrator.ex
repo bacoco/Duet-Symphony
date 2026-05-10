@@ -750,7 +750,8 @@ defmodule SymphonyElixir.Orchestrator do
         :ok
 
       {:error, reason} ->
-        raise RuntimeError, "Runner failed for #{issue_context(issue)}: #{inspect(reason)}"
+        raise RuntimeError,
+              "Runner #{inspect(runner)} failed for #{issue_context(issue)}: #{inspect(reason)}"
     end
   end
 

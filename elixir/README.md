@@ -7,6 +7,14 @@ This directory contains the Symphony-derived Elixir/OTP implementation for Duet-
 > Symphony Elixir is prototype software intended for evaluation only and is presented as-is.
 > We recommend implementing your own hardened version based on [`spec/SPEC.md`](../spec/SPEC.md).
 
+> [!NOTE]
+> This README has been modified from OpenAI Symphony's `elixir/README.md`
+> (upstream SHA `58cf97da06d556c019ccea20c67f4f77da124bf3`) to reflect
+> Duet-Symphony's repository layout, binary name (`duet-symphony`), and
+> project status. The Symphony-derived source code under `elixir/lib/` and
+> `elixir/test/` is preserved unmodified except where listed in the root
+> [`IMPLEMENTATION.md`](../IMPLEMENTATION.md) "Local Modifications" section.
+
 ## How it works
 
 1. Polls Linear for candidate work
