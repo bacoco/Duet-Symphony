@@ -168,6 +168,47 @@ The first slice is complete only when all of these are true:
 
 Full Claude/Codex duet orchestration is explicitly outside this first slice.
 
+## Baseline Test Status
+
+### 2026-05-10 local run
+
+Environment:
+
+- Runtime manager: `mise 2026.5.4` installed via Homebrew for this validation.
+- Erlang/OTP: `28` (`erts-16.4`)
+- Elixir: `1.19.5-otp-28`
+
+Commands run from `elixir/`:
+
+```bash
+mise trust
+mise install
+mise exec -- mix deps.get
+mise exec -- mix test
+mise exec -- mix test test/symphony_elixir/core_test.exs:557
+```
+
+Result:
+
+- Full suite: `230 tests, 1 failure, 2 skipped`
+- Targeted rerun: `1 test, 1 failure`
+- Failing test:
+  `test/symphony_elixir/core_test.exs:557`
+  `"abnormal worker exit increments retry attempt progressively"`
+- Failure signal:
+  `assert remaining_ms >= min_remaining_ms`, with observed remaining time
+  below the lower bound by roughly 200 ms.
+
+The failure is in an upstream timing-window assertion around retry scheduling.
+No `elixir/` source or fixture was modified after the subtree import. Do not
+start the rename/config/runner-selector slice until this baseline failure is
+classified by review as one of:
+
+- an environment-specific timing flaky that may be annotated or tolerated;
+- a CI-only pass that should be validated in GitHub Actions before proceeding;
+- an upstream test issue to patch locally with a clearly attributed delta; or
+- a true baseline blocker.
+
 ## Post-Import Root NOTICE Text
 
 Apply this root `NOTICE` wording in the same commit that imports upstream code:
