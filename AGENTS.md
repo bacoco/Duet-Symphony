@@ -76,7 +76,9 @@ as the artifact and convergence substrate.
   implement (`drive_turn(prompt, opts)`); `Duet.TurnDrivers.Mock`
   provides a stub for tests; `Duet.TurnDrivers.CodexAppServer`
   drives a real Codex App Server turn and collects streamed
-  `agent_message*` deltas into response text. `Duet.Branches`
+  `agent_message*` deltas into response text; `Duet.TurnDrivers.ClaudeCode`
+  invokes Claude Code with `--print --output-format stream-json` and
+  parses assistant stream events into response text. `Duet.Branches`
   computes the §6.1 / §9.1 branch names and validates §5.2 task IDs.
   `Duet.PhaseFreezeMessage.build/1` renders the §8.4 freeze text and
   `summary_word_target/2` returns the adaptive word budget per §8.4.
@@ -246,6 +248,11 @@ Completed first slice:
     per-task routing overrides, `gh` CLI wrapper, and notification hook
     surface. Still no PairRunner wiring beyond the existing Codex SPEC
     Author half-turn.
+23. Add `Duet.TurnDrivers.ClaudeCode`, a tested Claude Code CLI adapter
+    behind `Duet.TurnDriver`. It uses the spec-backed
+    `--print --output-format stream-json` command shape, sends prompts on
+    stdin, parses assistant/result stream events into response text, and
+    exposes an injectable runner for tests. Not wired into `PairRunner` yet.
 
 Next slice:
 
@@ -258,9 +265,9 @@ Subsequent slices:
 
 1. Add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
-2. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
-   Claude half; do not rely on fragile TTY automation unless no better option
-   exists.
+2. Wire `Duet.TurnDrivers.ClaudeCode` into the reviewer/author actor
+   selection once the PairRunner phase loop is implemented; do not rely on
+   fragile TTY automation unless no better option exists.
 3. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 

@@ -432,6 +432,29 @@ half-turn when the selected routing profile assigns SPEC authoring to
 - The reviewer half-turn, convergence evaluation, cycle continuation,
   phase freeze, PR operations, and Claude runtime are still future slices.
 
+## Claude Code Turn Driver Status
+
+The Claude Code runtime adapter is present behind the same `Duet.TurnDriver`
+behaviour, but it is not wired into `PairRunner` yet.
+
+- `SymphonyElixir.Duet.TurnDrivers.ClaudeCode` invokes Claude Code with the
+  spec-backed non-interactive command shape:
+  `claude --print --output-format stream-json`.
+- The prompt is sent over stdin, and the task workspace is passed as the
+  command working directory. Supported optional args include `:model`,
+  `:resume`, `:permission_mode`, and raw `:extra_args`.
+- `ClaudeCode.parse_stream/1` extracts assistant text from Claude Code
+  stream-json events, falling back to the final `result` field when no
+  assistant chunks are present. Malformed JSON and Claude error events are
+  returned as data.
+- `ClaudeCode.Runner` / `ClaudeCode.SystemRunner` mirror the other Duet
+  runner seams: production shells out to the real `claude` binary, while tests
+  inject a deterministic in-process runner. No tests invoke a real Claude
+  runtime.
+- This slice intentionally does not implement Claude GitHub bot mode and does
+  not alter PairRunner actor selection. Wiring Claude into the reviewer/author
+  side of the loop belongs to the next PairRunner phase-driver slice.
+
 ## Convergence Engine Status
 
 The convergence-engine pure helpers are complete. Together they cover
@@ -659,6 +682,9 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/turn_driver.ex`
 - `lib/symphony_elixir/duet/turn_drivers/mock.ex`
 - `lib/symphony_elixir/duet/turn_drivers/codex_app_server.ex`
+- `lib/symphony_elixir/duet/turn_drivers/claude_code.ex`
+- `lib/symphony_elixir/duet/turn_drivers/claude_code/runner.ex`
+- `lib/symphony_elixir/duet/turn_drivers/claude_code/system_runner.ex`
 - `lib/symphony_elixir/duet/branches.ex`
 - `lib/symphony_elixir/duet/phase_prompt.ex`
 - `lib/symphony_elixir/duet/phase_freeze_message.ex`
@@ -695,6 +721,7 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_turn_test.exs`
 - `test/symphony_elixir/duet_turn_driver_mock_test.exs`
 - `test/symphony_elixir/duet_turn_driver_codex_app_server_test.exs`
+- `test/symphony_elixir/duet_turn_driver_claude_code_test.exs`
 - `test/symphony_elixir/duet_branches_test.exs`
 - `test/symphony_elixir/duet_phase_prompt_test.exs`
 - `test/symphony_elixir/duet_phase_freeze_message_test.exs`
