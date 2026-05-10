@@ -153,14 +153,16 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
   # ── merge_phase_into_base ─────────────────────────────────────────
 
   describe "merge_phase_into_base/3" do
-    test "merges phase branch into base with --no-ff" do
-      put_response({:ok, ""})
+    test "checks out target then merges phase branch into base with --no-ff" do
+      put_responses([{:ok, ""}, {:ok, ""}])
 
       assert :ok = BranchHarness.merge_phase_into_base("my-task", "SPEC", base_opts())
 
-      assert_received {:git_invoked, args, _opts}
+      assert_received {:git_invoked, ["checkout", "duet-base/my-task"], _opts}
 
-      assert args == [
+      assert_received {:git_invoked, merge_args, _opts}
+
+      assert merge_args == [
                "merge",
                "--no-ff",
                "-m",
@@ -170,12 +172,13 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
     end
 
     test "works for PLAN phase" do
-      put_response({:ok, ""})
+      put_responses([{:ok, ""}, {:ok, ""}])
 
       assert :ok = BranchHarness.merge_phase_into_base("my-task", "PLAN", base_opts())
 
-      assert_received {:git_invoked, args, _opts}
-      assert Enum.member?(args, "duet-phase/my-task/plan")
+      assert_received {:git_invoked, ["checkout", "duet-base/my-task"], _opts}
+      assert_received {:git_invoked, merge_args, _opts}
+      assert Enum.member?(merge_args, "duet-phase/my-task/plan")
     end
 
     test "returns {:error, :invalid_phase} for REVIEW" do
@@ -188,8 +191,20 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
                BranchHarness.merge_phase_into_base("AB", "SPEC", base_opts())
     end
 
-    test "propagates runner failure" do
-      put_response({:error, {:exit_status, 1, "merge conflict"}})
+    test "propagates checkout failure before merge" do
+      put_response({:error, {:exit_status, 1, "checkout failed"}})
+
+      assert {:error, {:exit_status, 1, "checkout failed"}} =
+               BranchHarness.merge_phase_into_base("my-task", "SPEC", base_opts())
+
+      refute_received {:git_invoked, ["merge" | _], _}
+    end
+
+    test "propagates merge failure after successful checkout" do
+      put_responses([
+        {:ok, ""},
+        {:error, {:exit_status, 1, "merge conflict"}}
+      ])
 
       assert {:error, {:exit_status, 1, "merge conflict"}} =
                BranchHarness.merge_phase_into_base("my-task", "SPEC", base_opts())
@@ -199,14 +214,16 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
   # ── merge_base_into_main ──────────────────────────────────────────
 
   describe "merge_base_into_main/2" do
-    test "merges base branch into main with --no-ff" do
-      put_response({:ok, ""})
+    test "checks out main then merges base branch with --no-ff" do
+      put_responses([{:ok, ""}, {:ok, ""}])
 
       assert :ok = BranchHarness.merge_base_into_main("my-task", base_opts())
 
-      assert_received {:git_invoked, args, _opts}
+      assert_received {:git_invoked, ["checkout", "main"], _opts}
 
-      assert args == [
+      assert_received {:git_invoked, merge_args, _opts}
+
+      assert merge_args == [
                "merge",
                "--no-ff",
                "-m",
@@ -215,15 +232,17 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
              ]
     end
 
-    test "uses custom :target when provided" do
-      put_response({:ok, ""})
+    test "checks out custom :target when provided" do
+      put_responses([{:ok, ""}, {:ok, ""}])
 
       assert :ok =
                BranchHarness.merge_base_into_main("my-task", base_opts(target: "develop"))
 
-      assert_received {:git_invoked, args, _opts}
+      assert_received {:git_invoked, ["checkout", "develop"], _opts}
 
-      assert args == [
+      assert_received {:git_invoked, merge_args, _opts}
+
+      assert merge_args == [
                "merge",
                "--no-ff",
                "-m",
@@ -237,8 +256,20 @@ defmodule SymphonyElixir.DuetBranchHarnessTest do
                BranchHarness.merge_base_into_main("AB", base_opts())
     end
 
-    test "propagates runner failure" do
-      put_response({:error, {:exit_status, 1, "merge conflict"}})
+    test "propagates checkout failure" do
+      put_response({:error, {:exit_status, 1, "checkout failed"}})
+
+      assert {:error, {:exit_status, 1, "checkout failed"}} =
+               BranchHarness.merge_base_into_main("my-task", base_opts())
+
+      refute_received {:git_invoked, ["merge" | _], _}
+    end
+
+    test "propagates merge failure after checkout" do
+      put_responses([
+        {:ok, ""},
+        {:error, {:exit_status, 1, "merge conflict"}}
+      ])
 
       assert {:error, {:exit_status, 1, "merge conflict"}} =
                BranchHarness.merge_base_into_main("my-task", base_opts())

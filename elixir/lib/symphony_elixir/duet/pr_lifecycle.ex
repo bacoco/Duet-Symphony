@@ -66,18 +66,14 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
         ]
         |> maybe_add_runner(ctx)
 
-      case GhCli.open_pr(gh_opts) do
-        {:ok, %{number: number}} ->
-          EventLog.append(task_id, "pr_opened", %{
-            phase: phase,
-            pr_number: number,
-            title: title
-          })
-
-          {:ok, number}
-
-        {:error, reason} ->
-          {:error, reason}
+      with {:ok, %{number: number}} <- GhCli.open_pr(gh_opts),
+           :ok <-
+             record_event(task_id, "pr_opened", %{
+               phase: phase,
+               pr_number: number,
+               title: title
+             }) do
+        {:ok, number}
       end
     end
   end
@@ -144,18 +140,16 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
     task_id = Keyword.fetch!(opts, :task_id)
 
     Enum.reduce_while(actions, :ok, fn action, :ok ->
-      case execute_single_action(action, pr_number, opts) do
-        :ok ->
-          EventLog.append(task_id, "freeze_action_executed", %{
-            phase: phase,
-            action: Atom.to_string(action),
-            pr_number: pr_number
-          })
-
-          {:cont, :ok}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
+      with :ok <- execute_single_action(action, pr_number, opts),
+           :ok <-
+             record_event(task_id, "freeze_action_executed", %{
+               phase: phase,
+               action: Atom.to_string(action),
+               pr_number: pr_number
+             }) do
+        {:cont, :ok}
+      else
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
@@ -266,6 +260,13 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
   defp execute_single_action(:merge_base_branch, _pr_number, _opts) do
     # Delegates to BranchHarness; just record event for now.
     :ok
+  end
+
+  defp record_event(task_id, kind, attrs) do
+    case EventLog.append(task_id, kind, attrs) do
+      {:ok, _event} -> :ok
+      {:error, reason} -> {:error, {:event_log_failed, reason}}
+    end
   end
 
   defp maybe_add_runner(opts, %{runner: runner}) when is_atom(runner) and not is_nil(runner) do

@@ -819,7 +819,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
     |> Enum.reverse()
     |> Enum.reduce_while(nil, fn event, _acc ->
       cond do
-        Map.get(event, "kind") in ["task_completed", "task_failed", "human_checkpoint_resolved"] ->
+        Map.get(event, "kind") in ["task_completed", "task_failed", "human_checkpoint_resolved", "operator_resolution"] ->
           {:halt, nil}
 
         reason = awaiting_reason_from_event(event) ->

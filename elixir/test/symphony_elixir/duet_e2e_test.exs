@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.DuetE2ETest do
   @moduledoc """
-  End-to-end tests that verify `duet.enabled: true` works through
-  the Orchestrator dispatch path with MemoryTracker canned issues.
+  End-to-end tests that verify `duet.enabled: true` routes through
+  RunnerSelector to PairRunner and drives the phase pipeline.
   """
 
   use SymphonyElixir.TestSupport
@@ -36,7 +36,7 @@ defmodule SymphonyElixir.DuetE2ETest do
   # ── Test 1 ──────────────────────────────────────────────────────
 
   @tag :e2e
-  test "Orchestrator dispatches to PairRunner when duet.enabled is true" do
+  test "RunnerSelector routes to PairRunner and SPEC phase completes" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -47,9 +47,7 @@ defmodule SymphonyElixir.DuetE2ETest do
       workspace_root = Path.join(test_root, "workspaces")
 
       write_workflow_file!(Workflow.workflow_file_path(),
-        tracker_kind: "memory",
         workspace_root: workspace_root,
-        poll_interval_ms: 60_000,
         duet_yaml: """
         duet:
           enabled: true
@@ -65,39 +63,12 @@ defmodule SymphonyElixir.DuetE2ETest do
         url: "https://example.org/issues/E2E-1"
       }
 
-      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
       EventLog.set_root(Path.join(test_root, ".duet/logs"))
 
       response = approve_response("E2E SPEC")
 
-      orchestrator_name =
-        Module.concat(__MODULE__, :"DuetDispatchOrchestrator#{System.unique_integer([:positive])}")
-
-      {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
-
-      on_exit(fn ->
-        if Process.alive?(pid), do: Process.exit(pid, :normal)
-      end)
-
-      # Wait briefly so the orchestrator does its first poll cycle.
-      Process.sleep(200)
-
-      # The orchestrator should have dispatched to PairRunner.
-      # PairRunner will attempt to create a workspace and drive
-      # a SPEC turn. We verify the event log for task_started.
-      #
-      # Because PairRunner uses the real RunnerRuntime and the
-      # real turn drivers (claude/codex) in production, override
-      # at the PairRunner level is not easy from the Orchestrator
-      # path. Instead, let's verify via the RunnerSelector that
-      # the correct runner was chosen, and test through
-      # PairRunner.run/3 directly (the Orchestrator just calls
-      # runner.run/3).
       assert RunnerSelector.choose(Config.settings!()) == PairRunner
 
-      # Now exercise the actual PairRunner dispatch path end-to-end
-      # with mock turn drivers — the same path the Orchestrator
-      # would invoke after selecting the runner.
       assert :ok =
                PairRunner.run(issue, self(),
                  turn_driver: SymphonyElixir.Duet.TurnDrivers.Mock,

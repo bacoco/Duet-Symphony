@@ -108,6 +108,37 @@ defmodule SymphonyElixir.DuetTaskStateTest do
     assert state.phases["CODE"].cycle == 5
   end
 
+  test "operator_resolution event clears awaiting_operator gate" do
+    task_id = "TASK-OP-RESOLUTION"
+
+    assert {:ok, _} = EventLog.append(task_id, "task_started", %{identifier: "MT-902"})
+    assert {:ok, _} = EventLog.append(task_id, "phase_started", %{phase: "SPEC", cycle: 1})
+
+    assert {:ok, _} =
+             EventLog.append(task_id, "phase_frozen", %{
+               phase: "SPEC",
+               cycle: 1,
+               tree_hash: "abc",
+               awaiting_operator_reason: "pause_on_freeze"
+             })
+
+    {:ok, state_before} = TaskState.recover(task_id)
+    assert state_before.status == "awaiting_operator"
+    assert state_before.awaiting_operator_reason == "pause_on_freeze"
+
+    assert {:ok, _} =
+             EventLog.append(task_id, "operator_resolution", %{
+               phase: "SPEC",
+               reason: "pause_on_freeze",
+               decision: "continue",
+               action: "continue_freeze"
+             })
+
+    {:ok, state_after} = TaskState.recover(task_id)
+    assert state_after.status == "running"
+    assert state_after.awaiting_operator_reason == nil
+  end
+
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
   defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 end

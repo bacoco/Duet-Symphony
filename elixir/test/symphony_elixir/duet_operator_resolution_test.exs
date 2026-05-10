@@ -223,6 +223,36 @@ defmodule SymphonyElixir.DuetOperatorResolutionTest do
       assert state_after.awaiting_operator_reason == nil
     end
 
+    test "TaskState.recover shows gate cleared after generic resolve/3 (pause_on_freeze)" do
+      task_id = "OP-CLEAR-GENERIC"
+      seed_pause_on_freeze(task_id)
+
+      {:ok, state_before} = TaskState.recover(task_id)
+      assert state_before.status == "awaiting_operator"
+      assert state_before.awaiting_operator_reason == "pause_on_freeze"
+
+      assert {:ok, _result} = OperatorResolution.resolve(task_id, :continue)
+
+      {:ok, state_after} = TaskState.recover(task_id)
+      assert state_after.status == "running"
+      assert state_after.awaiting_operator_reason == nil
+    end
+
+    test "TaskState.recover shows gate cleared after phase_cap_escalation resolve" do
+      task_id = "OP-CLEAR-CAP"
+      seed_phase_cap_escalation(task_id)
+
+      {:ok, state_before} = TaskState.recover(task_id)
+      assert state_before.status == "awaiting_operator"
+      assert state_before.awaiting_operator_reason == "phase_cap_escalation"
+
+      assert {:ok, _result} = OperatorResolution.resolve(task_id, :approve_author)
+
+      {:ok, state_after} = TaskState.recover(task_id)
+      assert state_after.status == "running"
+      assert state_after.awaiting_operator_reason == nil
+    end
+
     test "TaskState.recover shows failed after fail resolution" do
       task_id = "OP-CLEAR-FAIL"
       seed_human_checkpoint(task_id)

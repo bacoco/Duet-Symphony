@@ -175,6 +175,13 @@ defmodule SymphonyElixir.Duet.TaskState do
     |> Map.put(:awaiting_operator_reason, nil)
   end
 
+  defp apply_event(%{"kind" => "operator_resolution"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> Map.put(:status, "running")
+    |> Map.put(:awaiting_operator_reason, nil)
+  end
+
   defp apply_event(event, state) when is_map(event), do: mark_seen(state, event)
 
   defp mark_seen(%State{} = state, event) do

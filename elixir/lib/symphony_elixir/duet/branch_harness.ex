@@ -240,12 +240,14 @@ defmodule SymphonyElixir.Duet.BranchHarness do
   end
 
   defp merge_branch(source, target, opts) do
-    case git(
-           ["merge", "--no-ff", "-m", "Merge #{source} into #{target}", source],
-           Keyword.put(opts, :checkout_target, target)
-         ) do
-      {:ok, _} -> :ok
-      {:error, _} = err -> err
+    with {:ok, _} <- git(["checkout", target], opts) do
+      case git(
+             ["merge", "--no-ff", "-m", "Merge #{source} into #{target}", source],
+             opts
+           ) do
+        {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
     end
   end
 
