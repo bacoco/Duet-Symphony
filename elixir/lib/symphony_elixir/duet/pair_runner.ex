@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
     ConvergenceOrchestrator,
     EventLog,
     HumanCheckpoint,
+    Identity,
     PhasePrompt,
     PhaseTransition,
     PRConflict,
@@ -36,6 +37,8 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   alias SymphonyElixir.RunnerRuntime
 
+  require Logger
+
   @phases ~w(SPEC PLAN CODE REVIEW)
   @phase_keys %{"SPEC" => "spec", "PLAN" => "plan", "CODE" => "code", "REVIEW" => "review"}
   @awaiting_reasons AwaitingOperator.reasons()
@@ -50,10 +53,18 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
     with {:ok, profile} <- RoutingSelection.resolve(settings.duet),
          :ok <- ensure_initial_state_events(issue, profile) do
+      warn_if_identity_invalid()
       ctx = context(settings, workspace, issue, update_recipient, opts, worker_host, profile)
       run_next_phase(ctx)
     else
       {:error, reason} -> {:error, {:state_event_failed, reason}}
+    end
+  end
+
+  defp warn_if_identity_invalid do
+    case Identity.validate_distinct_machine_identities() do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("Duet identity validation: #{inspect(reason)}")
     end
   end
 
@@ -72,15 +83,23 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp run_next_phase(ctx) do
-    case current_phase(ctx.issue) do
-      {:ok, :completed} ->
-        :ok
+    case EventLog.read(ctx.issue) do
+      {:ok, events} ->
+        ctx = Map.put(ctx, :events, events)
 
-      {:ok, phase} ->
-        ctx
-        |> Map.put(:phase, phase)
-        |> Map.put(:phase_key, Map.fetch!(@phase_keys, phase))
-        |> run_phase()
+        case current_phase_from_events(events) do
+          {:ok, :completed} ->
+            :ok
+
+          {:ok, phase} ->
+            ctx
+            |> Map.put(:phase, phase)
+            |> Map.put(:phase_key, Map.fetch!(@phase_keys, phase))
+            |> run_phase()
+
+          {:error, reason} ->
+            {:error, reason}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -123,7 +142,9 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp ensure_reviewer_turn(ctx, cycle, author_response) do
-    case existing_turn(ctx.issue, ctx.phase, cycle, ctx.reviewer) do
+    result = existing_turn_from_events(ctx[:events], ctx.issue, ctx.phase, cycle, ctx.reviewer)
+
+    case result do
       {:ok, %Turn{} = turn} ->
         {:ok, turn, transcript_response(ctx.issue, ctx.phase, cycle, ctx.reviewer, turn.summary)}
 
@@ -228,7 +249,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   defp build_prompt(ctx, cycle, role, actor, context_text) when role in [:author, :coder_ack] do
     prompt_context(ctx, cycle, role, actor, ctx.reviewer)
-    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx.issue))
+    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx))
     |> Map.put(:reviewer_feedback, context_text)
     |> PhasePrompt.build()
     |> append_tool_constraints(ctx, role, actor)
@@ -236,7 +257,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   defp build_prompt(ctx, cycle, role, actor, context_text) do
     prompt_context(ctx, cycle, role, actor, ctx.author)
-    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx.issue))
+    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx))
     |> Map.put(:current_artifact, context_text)
     |> PhasePrompt.build()
     |> append_tool_constraints(ctx, role, actor)
@@ -735,13 +756,25 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp existing_turn(issue, phase, cycle, actor) do
     case EventLog.read(issue) do
       {:ok, events} ->
-        events
-        |> Enum.find(&event_matches?(&1, "turn_response", %{"phase" => phase, "cycle" => cycle, "actor" => actor}))
-        |> turn_from_event()
+        find_turn_in_events(events, phase, cycle, actor)
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp existing_turn_from_events(nil, issue, phase, cycle, actor) do
+    existing_turn(issue, phase, cycle, actor)
+  end
+
+  defp existing_turn_from_events(events, _issue, phase, cycle, actor) do
+    find_turn_in_events(events, phase, cycle, actor)
+  end
+
+  defp find_turn_in_events(events, phase, cycle, actor) do
+    events
+    |> Enum.find(&event_matches?(&1, "turn_response", %{"phase" => phase, "cycle" => cycle, "actor" => actor}))
+    |> turn_from_event()
   end
 
   defp turn_from_event(nil), do: :missing
@@ -771,19 +804,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
     end
   end
 
-  defp current_phase(issue) do
-    case EventLog.read(issue) do
-      {:ok, events} ->
-        frozen = frozen_phases(events)
+  defp current_phase_from_events(events) do
+    frozen = frozen_phases(events)
 
-        cond do
-          reason = pending_awaiting_operator_reason(events) -> {:error, awaiting_error(reason)}
-          Enum.any?(events, &(Map.get(&1, "kind") == "task_completed")) -> {:ok, :completed}
-          true -> {:ok, Enum.find(@phases, &(!MapSet.member?(frozen, &1))) || :completed}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+    cond do
+      reason = pending_awaiting_operator_reason(events) -> {:error, awaiting_error(reason)}
+      Enum.any?(events, &(Map.get(&1, "kind") == "task_completed")) -> {:ok, :completed}
+      true -> {:ok, Enum.find(@phases, &(!MapSet.member?(frozen, &1))) || :completed}
     end
   end
 
@@ -827,20 +854,29 @@ defmodule SymphonyElixir.Duet.PairRunner do
     |> MapSet.new()
   end
 
+  defp prior_phase_summaries(%{events: events}) when is_list(events) do
+    prior_phase_summaries_from_events(events)
+  end
+
+  defp prior_phase_summaries(%{issue: issue}) do
+    prior_phase_summaries(issue)
+  end
+
   defp prior_phase_summaries(issue) do
     case EventLog.read(issue) do
-      {:ok, events} ->
-        events
-        |> Enum.filter(&(Map.get(&1, "kind") == "phase_frozen"))
-        |> Map.new(fn event ->
-          phase = Map.get(event, "phase")
-          summary = Map.get(event, "summary") || "#{phase} frozen with mode #{Map.get(event, "mode", "unknown")}"
-          {phase, summary}
-        end)
-
-      {:error, _reason} ->
-        %{}
+      {:ok, events} -> prior_phase_summaries_from_events(events)
+      {:error, _reason} -> %{}
     end
+  end
+
+  defp prior_phase_summaries_from_events(events) do
+    events
+    |> Enum.filter(&(Map.get(&1, "kind") == "phase_frozen"))
+    |> Map.new(fn event ->
+      phase = Map.get(event, "phase")
+      summary = Map.get(event, "summary") || "#{phase} frozen with mode #{Map.get(event, "mode", "unknown")}"
+      {phase, summary}
+    end)
   end
 
   defp event_recorded?(issue, kind, match_attrs) do

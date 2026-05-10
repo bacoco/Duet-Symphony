@@ -274,14 +274,29 @@ Completed first slice:
     gates; verification, human checkpoint, pause-on-freeze, SuperPower mirror,
     tool-profile prompt constraints, and optional CODE PR conflict gates are
     wired without executing real GitHub PR side effects.
+26. Wave 9 hardening: `BranchHarness` wraps `Duet.Branches` with injectable
+    Git shell commands for creating/merging/cleaning branches and worktrees.
+    `PRLifecycle` wraps `GhCli`/`PR`/`PhaseTransition` into phase-aware PR
+    operations (open/comment/review/merge) at freeze boundaries with event
+    tracing. `OperatorResolution` handles operator decisions to resume from
+    `awaiting_operator` gates via `AwaitingOperator.apply_decision/3` with
+    event recording. `PairRunner` validates `Identity.validate_distinct_machine_identities/0`
+    at boot (advisory warning) and caches EventLog reads to reduce I/O per
+    dispatch. E2E tests verify `duet.enabled: true` through the dispatch path
+    including full 4-phase lifecycle and human checkpoint gates.
 
 Next slice:
 
-1. Start wave 9 hardening: add end-to-end dispatcher tests for `duet.enabled`,
-   wire operator resolution commands/events for `awaiting_operator`, attach
-   real `GhCli` PR open/ready/merge/comment/review side effects at the
-   `PhaseTransition.freeze_actions/1` boundaries, and extend CI/docs around
-   the runnable local pair loop.
+1. Wire `BranchHarness` and `PRLifecycle` into `PairRunner` freeze actions:
+   call `BranchHarness.ensure_base_branch` at task start,
+   `BranchHarness.ensure_phase_branch` at phase start,
+   `PRLifecycle.open_phase_pr` after phase branch creation,
+   `PRLifecycle.execute_freeze_actions` at freeze boundaries, and
+   `BranchHarness.cleanup_phase_branch` after phase PR merge.
+2. Wire `OperatorResolution` into the API/CLI layer so operators can
+   resume paused tasks.
+3. Add end-to-end tests exercising real `BranchHarness` Git operations
+   in a temp repo with mock GhCli runner.
 
 Subsequent slices:
 

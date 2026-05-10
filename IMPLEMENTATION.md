@@ -447,6 +447,39 @@ are not executed yet.
   slice records the event-log boundaries and freeze-action metadata where PR
   open/ready/merge/comment/review operations attach.
 
+## Wave 9 Hardening Status
+
+The wave-9 hardening modules are in place. They are not yet wired into
+`PairRunner` freeze actions; the next slice connects them at the recorded
+freeze-action boundaries.
+
+- `SymphonyElixir.Duet.BranchHarness` wraps `Duet.Branches` with injectable
+  Git shell commands (`BranchHarness.Runner` behaviour, `SystemRunner`
+  default). Provides `ensure_base_branch/2`, `ensure_phase_branch/3`,
+  `merge_phase_into_base/3`, `merge_base_into_main/2`, `phase_workspace/3`,
+  and `cleanup_phase_branch/3`. REVIEW is skipped for phase branches per
+  §8.1 / §9.2. 33 tests.
+- `SymphonyElixir.Duet.PRLifecycle` wraps `GhCli` / `PR` /
+  `PhaseTransition` into phase-aware PR operations: `open_phase_pr/1`
+  (REVIEW reuses CODE PR from events), `post_author_trailer/3`,
+  `submit_reviewer_verdict/4`, `execute_freeze_actions/3` (dispatches
+  per `PhaseTransition.freeze_actions/1`), and `resolve_code_pr_number/1`.
+  Each operation records tracing events. 19 tests.
+- `SymphonyElixir.Duet.OperatorResolution` handles operator decisions to
+  resume from `awaiting_operator` gates: `resolve/3` validates state,
+  delegates to `AwaitingOperator.apply_decision/3`, records resolution
+  events. `pending_gates/1` reports current gate info.
+  `resolve_human_checkpoint/2` is a convenience wrapper that records the
+  `human_checkpoint_resolved` event recognized by `PairRunner`. 18 tests.
+- `PairRunner` now calls `Identity.validate_distinct_machine_identities/0`
+  at boot (advisory `Logger.warning`, does not fail the loop). EventLog
+  reads are cached in the context map for `run_next_phase`,
+  `ensure_reviewer_turn`, and `prior_phase_summaries` to reduce I/O
+  per dispatch.
+- E2E tests verify `duet.enabled: true` through the dispatch path:
+  Orchestrator routing to PairRunner, full 4-phase lifecycle with
+  `task_completed`, and human checkpoint gate retry semantics. 3 tests.
+
 ## Claude Code Turn Driver Status
 
 The Claude Code runtime adapter is present behind the same `Duet.TurnDriver`
@@ -762,6 +795,15 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_super_power_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
+- `lib/symphony_elixir/duet/branch_harness.ex`
+- `lib/symphony_elixir/duet/branch_harness/runner.ex`
+- `lib/symphony_elixir/duet/branch_harness/system_runner.ex`
+- `lib/symphony_elixir/duet/pr_lifecycle.ex`
+- `lib/symphony_elixir/duet/operator_resolution.ex`
+- `test/symphony_elixir/duet_branch_harness_test.exs`
+- `test/symphony_elixir/duet_pr_lifecycle_test.exs`
+- `test/symphony_elixir/duet_operator_resolution_test.exs`
+- `test/symphony_elixir/duet_e2e_test.exs`
 
 ## Baseline Test Status
 
