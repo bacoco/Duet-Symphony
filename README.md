@@ -45,6 +45,7 @@ Duet-Symphony/
 ├── spec/                  # Language-agnostic specification (standalone)
 │   ├── README.md          #   Reading guide for implementers
 │   └── SPEC.md            #   Normative spec v0.4.1
+├── elixir/                # After import: Symphony-derived implementation (Apache-2.0)
 ├── AGENTS.md              # Project handoff notes and implementation guidance
 ├── IMPLEMENTATION.md      # Import strategy and implementation checkpoints
 ├── REVIEW.md              # Design review and risk backlog
@@ -61,6 +62,11 @@ for the reading order.
 **For contributors:** the implementation (a Symphony fork with Duet
 pair-runtime overlay) will live alongside `spec/` once development begins.
 `AGENTS.md` has the current implementation roadmap.
+
+After the implementation import, `elixir/` is treated as Symphony-derived code
+under Apache-2.0 and carries its own `elixir/LICENSE` and `elixir/NOTICE`.
+The root `LICENSE` remains the MIT license for Duet-Symphony's original spec
+and design overlay.
 
 The spec now also defines an initial operator routing menu, per-phase
 human-in-the-loop checkpoints, optional verification gates, draft PR lifecycle,

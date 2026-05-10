@@ -44,27 +44,40 @@ as the artifact and convergence substrate.
 ## Next Implementation Step
 
 Study and import the OpenAI Symphony implementation with the smallest possible
-Duet patch set:
+Duet patch set. Follow `IMPLEMENTATION.md` for the exact upstream sync
+procedure, imported SHA tracking, and licensing requirements.
 
-1. Add OpenAI Symphony as an upstream remote, subtree, or vendored baseline and
-   preserve Apache-2.0/NOTICE attribution.
-2. Identify the narrow worker boundary around Symphony's `AgentRunner` and keep
-   the existing single-Codex runner as compatibility mode.
-3. Add a `duet_pair` runtime that coordinates Claude + Codex while emitting
-   Symphony-compatible worker updates.
-4. Add the initial operator routing menu/UI so a task can choose Claude,
+First slice:
+
+1. Import upstream Symphony's `elixir/` subtree under local `elixir/` and
+   preserve Apache-2.0 license/NOTICE attribution.
+2. Run the upstream baseline tests before any rename.
+3. Rename the escript binary from `symphony` to `duet-symphony`, sweep test
+   references with `rg "symphony" elixir/test`, and rerun tests.
+4. Add `duet:` config parsing to `Config.Schema` without removing existing
+   Symphony config.
+5. Add a runner selector that keeps the existing single-Codex `AgentRunner` as
+   the default compatibility mode.
+6. Add `Duet.PairRunner.run/3` only as a tested stub returning
+   `{:error, :not_implemented}` when `duet.enabled: true`.
+
+Subsequent slices:
+
+1. Extract shared workspace lifecycle setup from `AgentRunner` before giving
+   `Duet.PairRunner` real behavior.
+2. Add the initial operator routing menu/UI so a task can choose Claude,
    Codex, both, human checkpoints, or a custom per-phase profile before
    dispatch.
-5. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
+3. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
    settings under a `duet:` front-matter key.
-6. Use Codex App Server for the Codex half first; add Codex Cloud as an
+4. Use Codex App Server for the Codex half first; add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
-7. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
+5. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
    Claude half; do not rely on fragile TTY automation unless no better option
    exists.
-8. Parse only the final `---DUET-TRAILER---` block from each agent response and
+6. Parse only the final `---DUET-TRAILER---` block from each agent response and
    persist structured events to `.duet/logs/tasks/<task_id>/events.jsonl`.
-9. Add optional SuperPower artifact support under `docs/superpowers/` for
+7. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 
 ## Known Design Constraints
