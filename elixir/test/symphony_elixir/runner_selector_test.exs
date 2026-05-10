@@ -28,10 +28,14 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       )
 
       issue = %Issue{id: "issue-duet", identifier: "DUET-1"}
+      EventLog.set_root(Path.join(test_root, ".duet/logs"))
 
       assert {:error, :not_implemented} = PairRunner.run(issue)
       assert {:error, :not_implemented} = PairRunner.run(issue, self())
       assert {:error, :not_implemented} = PairRunner.run(issue, self(), [])
+
+      assert {:ok, events} = EventLog.read(issue)
+      assert Enum.map(events, & &1["kind"]) == ["task_started", "agent_routing_selected", "phase_started", "task_failed"]
     after
       File.rm_rf(test_root)
     end
@@ -73,7 +77,7 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       assert File.read!(Path.join(workspace_path, "before_run.txt")) == "before"
       assert File.read!(Path.join(workspace_path, "after_run.txt")) == "after"
 
-      assert {:ok, [task_started, routing_selected, phase_started]} = EventLog.read(issue)
+      assert {:ok, [task_started, routing_selected, phase_started, task_failed]} = EventLog.read(issue)
 
       assert task_started["kind"] == "task_started"
       assert task_started["task_id"] == "issue-duet-lifecycle"
@@ -91,6 +95,10 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       assert phase_started["task_id"] == "issue-duet-lifecycle"
       assert phase_started["phase"] == "SPEC"
       assert phase_started["cycle"] == 1
+
+      assert task_failed["kind"] == "task_failed"
+      assert task_failed["task_id"] == "issue-duet-lifecycle"
+      assert task_failed["reason"] == "not_implemented"
     after
       File.rm_rf(test_root)
     end

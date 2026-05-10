@@ -561,7 +561,7 @@ defmodule SymphonyElixir.CoreTest do
     assert is_integer(due_at_ms)
     # DUET-LOCAL-DELTA: tolerate slower local/CI schedulers while preserving
     # the upstream retry delay contract for this near-term retry path.
-    assert_due_in_range(due_at_ms, 250, 1_200)
+    assert_due_in_range(due_at_ms, 450, 1_200)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do

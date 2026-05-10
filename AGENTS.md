@@ -41,8 +41,9 @@ as the artifact and convergence substrate.
 - The first `.duet` persistence/recovery slices are in place: `Duet.EventLog`
   writes JSONL under `.duet/logs/tasks/<task_id>/events.jsonl`, `PairRunner`
   emits the initial `task_started`, `agent_routing_selected`, and
-  `phase_started` events, and `Duet.TaskState` reconstructs task/phase state
-  while detecting routing divergence.
+  `phase_started` events idempotently plus the current stub `task_failed`
+  marker, and `Duet.TaskState` reconstructs task/phase state while surfacing
+  routing divergence without discarding recovered state.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -80,6 +81,9 @@ Completed first slice:
    the default compatibility mode.
 6. Add `Duet.PairRunner.run/3` only as a tested stub returning
    `{:error, :not_implemented}` when `duet.enabled: true`.
+7. Stabilize the initial event log/recovery contract: PairRunner startup
+   events are idempotent across retries, the stub records `task_failed`, and
+   `TaskState.recover/2` returns recovered state even when routing diverges.
 
 Next slice:
 

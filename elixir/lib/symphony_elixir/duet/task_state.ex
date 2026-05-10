@@ -1,6 +1,10 @@
 defmodule SymphonyElixir.Duet.TaskState do
   @moduledoc """
   Reconstructs Duet task state from the append-only event log.
+
+  Event phases use the uppercase spec convention (`SPEC`, `PLAN`, `CODE`,
+  `REVIEW`). Routing profile phases use lowercase config keys
+  (`spec`, `plan`, `code`, `review`).
   """
 
   alias SymphonyElixir.Duet.{EventLog, Routing}
@@ -32,6 +36,7 @@ defmodule SymphonyElixir.Duet.TaskState do
             current_phase: String.t() | nil,
             routing: map() | nil,
             routing_status: routing_status(),
+            routing_divergence: map() | nil,
             phases: %{String.t() => Phase.t()},
             events_count: non_neg_integer(),
             last_event: map() | nil
@@ -41,6 +46,7 @@ defmodule SymphonyElixir.Duet.TaskState do
       :task_id,
       :current_phase,
       :routing,
+      :routing_divergence,
       :last_event,
       status: "unknown",
       routing_status: "missing",
@@ -157,11 +163,21 @@ defmodule SymphonyElixir.Duet.TaskState do
         if recorded == current do
           {:ok, %State{state | routing_status: "matched"}}
         else
-          {:error, {:routing_divergence, recorded, current}}
+          {:ok,
+           %State{
+             state
+             | routing_status: "diverged",
+               routing_divergence: %{"recorded" => recorded, "current" => current}
+           }}
         end
 
       {:error, reason} ->
-        {:error, {:routing_resolution_failed, reason}}
+        {:ok,
+         %State{
+           state
+           | routing_status: "resolution_failed",
+             routing_divergence: %{"reason" => inspect(reason)}
+         }}
     end
   end
 

@@ -193,7 +193,9 @@ The first slice is complete.
 > shared runner runtime can create workspaces and run hooks before returning
 > `{:error, :not_implemented}`. The orchestrator dispatch wrapper then raises,
 > which crashes the issue task and triggers the standard retry policy. Every
-> claimed issue will burn the retry budget without producing useful work.
+> claimed issue will burn the retry budget without producing useful work. The
+> stub writes an idempotent `task_failed` marker so recovery surfaces the task
+> as failed instead of indefinitely running.
 
 The shared runtime extraction below completes the workspace lifecycle
 prerequisite before real Claude/Codex behavior is added to `Duet.PairRunner`.
@@ -245,12 +247,14 @@ The first `.duet` persistence and recovery slices are complete.
   `<logs_root>/.duet/logs`.
 - `Duet.PairRunner` emits `task_started`, `agent_routing_selected`, and
   `phase_started` for the initial `SPEC` phase before returning its current
-  stub result.
+  stub result. These initial events are idempotent across runner retries.
+- While the pair runner remains a stub, it records one `task_failed` event with
+  `reason = "not_implemented"` before returning `{:error, :not_implemented}`.
 - `SymphonyElixir.Duet.TaskState` reconstructs task status, current phase,
   per-phase state, event count, and routing from the append-only log.
 - Recovery compares the recorded routing selection with the current resolved
-  `duet.agent_routing` profile and returns `{:routing_divergence, recorded,
-  current}` when they differ.
+  `duet.agent_routing` profile and keeps the recovered state available with
+  `routing_status = "diverged"` when they differ.
 - No Claude/Codex runtime calls are introduced in this slice.
 
 ## Local Modifications Inside elixir/
@@ -272,7 +276,7 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
-| `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows after the same upstream timing flake failed on pinned GitHub Actions |
+| `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows near lines 562 and 604 after the same upstream timing flake failed on pinned GitHub Actions run `25628886607` |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
 
 ### New Duet-only files (no upstream conflict expected)
@@ -352,9 +356,11 @@ Later CI reclassification:
 
 Classification update: upstream timing-flaky requiring a local test tolerance
 delta. The test windows in `test/symphony_elixir/core_test.exs` were widened
-without changing production retry logic. This is a test-only Duet local delta
-and should be reviewed on each upstream sync. If future runs fail outside these
-same retry timing assertions, stop and re-classify before continuing.
+without changing production retry logic. The short retry assertion remains
+bounded at `450..1200` ms to preserve sensitivity to retry-order regressions.
+This is a test-only Duet local delta and should be reviewed on each upstream
+sync. If future runs fail outside these same retry timing assertions, stop and
+re-classify before continuing.
 
 ## Post-Import Root NOTICE Text
 

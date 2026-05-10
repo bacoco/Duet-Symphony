@@ -79,11 +79,12 @@ defmodule SymphonyElixir.DuetTaskStateTest do
       """
     )
 
-    assert {:error, {:routing_divergence, recorded, current}} =
-             TaskState.recover(task_id, Config.settings!().duet)
+    assert {:ok, state} = TaskState.recover(task_id, Config.settings!().duet)
 
-    assert recorded["profile_name"] == "duet_balanced"
-    assert current["profile_name"] == "codex_only_dev"
+    assert state.routing_status == "diverged"
+    assert state.routing["profile_name"] == "duet_balanced"
+    assert state.routing_divergence["recorded"]["profile_name"] == "duet_balanced"
+    assert state.routing_divergence["current"]["profile_name"] == "codex_only_dev"
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
