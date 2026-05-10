@@ -361,15 +361,19 @@ The first Duet phase-prompt builder slice is complete.
 
 The TurnDriver, Branches, PhaseFreezeMessage, Transcripts, and
 description-length-bound slices are complete. They prepare the seams
-needed by the Codex App Server pair loop without touching any agent
-runtime yet.
+needed by the Codex App Server pair loop; the first Codex SPEC Author
+turn now consumes those seams through `PairRunner`.
 
 - `SymphonyElixir.Duet.TurnDriver` is a `@behaviour` with one callback
   `drive_turn(prompt, opts) :: {:ok, response} | {:error, term()}`.
   `SymphonyElixir.Duet.TurnDrivers.Mock` is the in-process implementation
   used by tests and stubs: it returns `opts[:response]` if a binary,
   otherwise `opts[:error]`, otherwise `{:error, :no_canned_response}`.
-  Codex/Claude implementations will be added behind this same behaviour.
+  `SymphonyElixir.Duet.TurnDrivers.CodexAppServer` is the first real
+  implementation behind the same behaviour; it delegates session and
+  tool handling to `SymphonyElixir.Codex.AppServer` and collects streamed
+  Codex agent-message deltas into the raw response text consumed by
+  `Duet.Turn.record_response/6`.
 - `SymphonyElixir.Duet.Branches` exposes pure helpers for the spec §6.1
   / §9.1 branch topology and the §5.2 `task_id` regex:
   `base_branch/1`, `phase_branch/2` (only `:spec`/`:plan`/`:code` —
@@ -396,9 +400,37 @@ runtime yet.
   and appends a `[truncated to <max> chars per spec §14]` marker when
   truncation occurs. This enforces the §14 "operator input MUST be
   bounded in length" requirement at the prompt-rendering layer.
-- None of the five slices touches an agent runtime, opens a PR, or
-  emits new event kinds. They form the seam consumed by the upcoming
-  Codex App Server pair-loop driver slice.
+- The scaffolding slices do not open PRs or emit additional event kinds;
+  `PairRunner` now consumes them for the first Codex SPEC Author turn.
+
+## Codex App Server Pair-Loop Status
+
+The first Codex runtime slice is complete, but only for the SPEC Author
+half-turn when the selected routing profile assigns SPEC authoring to
+`codex`.
+
+- `SymphonyElixir.Duet.TurnDrivers.CodexAppServer` implements
+  `Duet.TurnDriver` on top of the existing `SymphonyElixir.Codex.AppServer`.
+  Required options are `:workspace` and `:issue`; supported pass-through
+  options are `:worker_host`, `:tool_executor`, and `:on_message`.
+- The driver preserves App Server runtime behavior (JSON-RPC startup,
+  workspace validation, dynamic tool handling, remote worker support, and
+  orchestrator update forwarding) while collecting
+  `codex/event/agent_message*` stream deltas into a single response string.
+- `SymphonyElixir.Duet.PairRunner` now resolves the active routing profile,
+  and when the SPEC Author is `codex`, it builds a `Duet.PhasePrompt`,
+  records `turn_request`, dispatches the selected `TurnDriver`, writes
+  the §13.2 transcript, parses the response via `Turn.record_response/6`,
+  and then records `task_failed` with `reason = "reviewer_not_implemented"`.
+- Profiles whose SPEC Author is not Codex keep the earlier stub behavior:
+  initial state events are emitted idempotently, a single `task_failed`
+  with `reason = "not_implemented"` is recorded, and the runner returns
+  `{:error, :not_implemented}`.
+- A previously recorded SPEC/cycle-1 Codex `turn_response` is treated as
+  already dispatched on retry; PairRunner does not re-run Codex for that
+  same turn and returns `{:error, :reviewer_not_implemented}`.
+- The reviewer half-turn, convergence evaluation, cycle continuation,
+  phase freeze, PR operations, and Claude runtime are still future slices.
 
 ## Convergence Engine Status
 
@@ -580,6 +612,7 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/turn.ex`
 - `lib/symphony_elixir/duet/turn_driver.ex`
 - `lib/symphony_elixir/duet/turn_drivers/mock.ex`
+- `lib/symphony_elixir/duet/turn_drivers/codex_app_server.ex`
 - `lib/symphony_elixir/duet/branches.ex`
 - `lib/symphony_elixir/duet/phase_prompt.ex`
 - `lib/symphony_elixir/duet/phase_freeze_message.ex`
@@ -606,6 +639,7 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_trailer_test.exs`
 - `test/symphony_elixir/duet_turn_test.exs`
 - `test/symphony_elixir/duet_turn_driver_mock_test.exs`
+- `test/symphony_elixir/duet_turn_driver_codex_app_server_test.exs`
 - `test/symphony_elixir/duet_branches_test.exs`
 - `test/symphony_elixir/duet_phase_prompt_test.exs`
 - `test/symphony_elixir/duet_phase_freeze_message_test.exs`

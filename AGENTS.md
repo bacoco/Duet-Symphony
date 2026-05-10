@@ -62,8 +62,8 @@ as the artifact and convergence substrate.
   `turn_response` (success), `trailer_rejected` (missing/malformed/
   position_invalid), or `low_confidence_approve` (warning) per spec
   §13.1, while binding the tree-hash to the orchestrator-supplied
-  value rather than any agent-claimed hash. Not yet wired into
-  PairRunner.
+  value rather than any agent-claimed hash. It is wired for the first
+  Codex SPEC Author turn only.
 - The first phase-prompt builder slice is in place:
   `SymphonyElixir.Duet.PhasePrompt.build/1` produces a deterministic
   Author/Reviewer prompt for a given phase + cycle + role + routing
@@ -74,14 +74,23 @@ as the artifact and convergence substrate.
 - The pair-loop scaffolding slices are in place:
   `Duet.TurnDriver` is the `@behaviour` future Codex/Claude drivers
   implement (`drive_turn(prompt, opts)`); `Duet.TurnDrivers.Mock`
-  provides a stub for tests. `Duet.Branches` computes the §6.1 / §9.1
-  branch names and validates §5.2 task IDs.
+  provides a stub for tests; `Duet.TurnDrivers.CodexAppServer`
+  drives a real Codex App Server turn and collects streamed
+  `agent_message*` deltas into response text. `Duet.Branches`
+  computes the §6.1 / §9.1 branch names and validates §5.2 task IDs.
   `Duet.PhaseFreezeMessage.build/1` renders the §8.4 freeze text and
   `summary_word_target/2` returns the adaptive word budget per §8.4.
   `Duet.Transcripts.write/6` persists the §13.2 per-turn prompt+response
   to `<log_dir>/tasks/<task_id>/transcripts/<phase>-<cycle>-<actor>.md`.
-  None of these touches an agent runtime; PairRunner does not yet
-  consume them.
+  `PairRunner` now consumes these pieces for the first Codex SPEC Author
+  turn when the selected profile assigns SPEC authoring to `codex`.
+- The first Codex App Server pair-loop slice is in place:
+  `PairRunner` builds the SPEC Author prompt, records `turn_request`,
+  dispatches via the configured `TurnDriver`, writes the transcript,
+  parses the trailer through `Turn.record_response/6`, and then stops
+  with `{:error, :reviewer_not_implemented}` because the reviewer turn
+  and convergence loop are not implemented yet. Profiles whose SPEC
+  Author is not Codex still use the `{:error, :not_implemented}` stub.
 - The convergence-engine pure helpers are in place:
   `Duet.Convergence` implements the §9.3 split-signal mapping and the
   §10.2 convergence rule (both APPROVE on same tree-hash);
@@ -217,19 +226,17 @@ Completed first slice:
     `Duet.SuperPower` (§8.5 mode + path resolver, validate_config),
     and `Duet.PRConflict` (§8.3.1 mergeability decider + event attrs).
     All pure, no orchestrator wiring yet.
+21. Add `Duet.TurnDrivers.CodexAppServer` and wire the first Codex SPEC
+    Author turn through `PairRunner` for profiles whose SPEC Author is
+    `codex`; the runner now records request/response events and
+    transcripts for that one turn, then stops before the missing reviewer.
 
 Next slice:
 
-1. Use Codex App Server for the Codex half of the real pair loop while keeping
-   the existing `AgentRunner` compatibility path intact. Implement
-   `Duet.TurnDrivers.CodexAppServer` against the existing
-   `SymphonyElixir.Codex.AppServer`. The pair-loop driver should: build a
-   prompt with `Duet.PhasePrompt.build/1`, record it via
-   `Duet.Turn.record_request/5`, dispatch it via the chosen `TurnDriver`
-   implementation, write `Duet.Transcripts.write/6` for audit, capture the
-   response, feed it into `Duet.Turn.record_response/6`, and use the
-   convergence/cycle-cap/pathological helpers to decide when to converge,
-   escalate, or fail per spec §10.
+1. Add the reviewer half of the SPEC pair loop: dispatch the configured
+   reviewer actor after a successful Author response, record its trailer,
+   evaluate `Duet.Convergence`, and either freeze SPEC, continue to the
+   next cycle, or hit `Duet.CycleCap` per spec §10.
 
 Subsequent slices:
 
