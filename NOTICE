@@ -1,0 +1,10 @@
+Duet-Symphony
+Copyright 2024 bacoco
+
+This project is inspired by and derives design concepts from OpenAI Symphony
+(https://github.com/openai/symphony), which is licensed under the Apache
+License, Version 2.0.
+
+When the implementation includes code copied or derived from OpenAI Symphony,
+the Apache-2.0 license, copyright notices, and NOTICE attribution from that
+project must be preserved.
