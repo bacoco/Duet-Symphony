@@ -494,6 +494,52 @@ loop. None are wired into the orchestrator or any agent runtime yet.
   emits new event kinds. They form the pure substrate that the
   upcoming orchestrator wiring slices will consume.
 
+## Operator Gates + GitHub Integration Helpers Status
+
+Five further pure helpers are complete. They cover the operator-facing
+gate surface (`awaiting_operator` reasons, §8.3.1 PR conflicts), the
+spec §9.4 PR title/body format, the §9.3 GitHub PR Reviews API parser,
+and the §8.5 SuperPower artifact mode resolver.
+
+- `SymphonyElixir.Duet.AwaitingOperator` enumerates the seven spec-defined
+  `awaiting_operator` reasons (`:pause_on_freeze`, `:code_pr_conflict`,
+  `:human_checkpoint`, `:verification_timeout`,
+  `:superpower_artifact_invalid`, `:phase_cap_escalation`,
+  `:state_divergence`) with `valid_decisions/1`, `valid?/2`, and
+  `apply_decision/3` translating each (reason, decision) into the
+  canonical orchestrator action. `:human_checkpoint` `:request_changes`
+  returns to CODE for REVIEW per §8.6; `:phase_cap_escalation`
+  emits `{:freeze_with_mode, :operator_override_*}` per §10.4.2.
+- `SymphonyElixir.Duet.PR` produces the spec §9.4 PR title
+  (`[duet:<task_id>] <phase>: <title>`) and a markdown body that
+  includes the operator description (bounded at 50 000 chars per §14
+  with the same marker as `Duet.PhasePrompt`), the current cycle, and
+  the event log path.
+- `SymphonyElixir.Duet.GithubReview` parses already-decoded JSON from
+  `gh api .../pulls/<n>/reviews` into `%GithubReview{}` structs
+  (`parse_reviews/1`), reduces them to the latest non-dismissed review
+  per identity per spec §11.1 (`latest_per_reviewer/1`), and exposes
+  the §9.3 binding-state mapping (`binding_state/1`) consistent with
+  `Duet.Convergence.from_github_review_state/1`. DISMISSED reviews
+  remove the identity from the latest map.
+- `SymphonyElixir.Duet.SuperPower` resolves the spec §8.5 SuperPower
+  config from a raw map: `enabled?/1`, `mode/1` (defaults to
+  `:mirror`), `root/1` (defaults to `docs/superpowers`),
+  `phase_enabled?/2`, `artifact_path/3` (returns
+  `<root>/<specs|plans|code|reviews>/<sanitized_task_id>.md`),
+  `template_check/2` (v1 stub returning `:ok`), and
+  `validate_config/1`. `Config.Schema` wiring is intentionally
+  deferred.
+- `SymphonyElixir.Duet.PRConflict` decides the §8.3.1 mergeability of
+  the held-open CODE PR via `evaluate/1`, returning `:mergeable`,
+  `{:conflict, %{paths, base_head}}`, or
+  `{:retry_later, mergeable_state}` when GitHub has not yet computed
+  mergeability. `event_attrs/3` builds the `code_pr_conflict` event
+  payload per the spec.
+- None of these slices touches an agent runtime, opens a PR, or emits
+  new event kinds. They are pure helpers for the upcoming
+  orchestrator wiring.
+
 ## Local Modifications Inside elixir/
 
 The files listed below carry Duet-specific deltas on top of the upstream
@@ -548,6 +594,11 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/human_checkpoint.ex`
 - `lib/symphony_elixir/duet/tool_profile.ex`
 - `lib/symphony_elixir/duet/verification_gate.ex`
+- `lib/symphony_elixir/duet/awaiting_operator.ex`
+- `lib/symphony_elixir/duet/pr.ex`
+- `lib/symphony_elixir/duet/pr_conflict.ex`
+- `lib/symphony_elixir/duet/github_review.ex`
+- `lib/symphony_elixir/duet/super_power.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/duet_event_log_test.exs`
 - `test/symphony_elixir/duet_routing_selection_test.exs`
@@ -569,6 +620,11 @@ this section in sync with the modifications applied per slice.
 - `test/symphony_elixir/duet_human_checkpoint_test.exs`
 - `test/symphony_elixir/duet_tool_profile_test.exs`
 - `test/symphony_elixir/duet_verification_gate_test.exs`
+- `test/symphony_elixir/duet_awaiting_operator_test.exs`
+- `test/symphony_elixir/duet_pr_test.exs`
+- `test/symphony_elixir/duet_pr_conflict_test.exs`
+- `test/symphony_elixir/duet_github_review_test.exs`
+- `test/symphony_elixir/duet_super_power_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
 

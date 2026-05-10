@@ -107,6 +107,22 @@ as the artifact and convergence substrate.
   implementation-defined identifier set); `Duet.VerificationGate`
   provides the §8.7 data layer (`aggregate_status/1`, `build_block/2`,
   `timeout_block/1`). None wired into PairRunner yet.
+- The operator-gate + GitHub-integration pure helpers are in place:
+  `Duet.AwaitingOperator` enumerates the 7 spec-defined
+  `awaiting_operator` reasons and translates each (reason, decision)
+  to the canonical orchestrator action (REVIEW `:request_changes`
+  returns to CODE; `:phase_cap_escalation` produces
+  `:operator_override_*` freeze modes). `Duet.PR` produces the §9.4
+  PR title and body (description bounded at 50 000 chars per §14).
+  `Duet.GithubReview` parses the GitHub PR Reviews API JSON, picks
+  the latest non-dismissed review per identity per §11.1, and exposes
+  the §9.3 binding-state mapping. `Duet.SuperPower` resolves §8.5
+  artifact mode (mirror/enforce), per-phase enablement, and
+  `<root>/<specs|plans|code|reviews>/<task_id>.md` paths.
+  `Duet.PRConflict` decides §8.3.1 mergeability of the held-open
+  CODE PR with `:mergeable` / `{:conflict, ...}` / `{:retry_later, ...}`
+  results and builds the `code_pr_conflict` event payload. None wired
+  into PairRunner yet.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -193,6 +209,14 @@ Completed first slice:
     builder + status aggregator). All pure, no orchestrator wiring yet;
     schema wiring for `tool_profiles` and `verification_gate` config
     blocks is a deliberate follow-up.
+20. Add `Duet.AwaitingOperator` (the 7-reason / decision dispatch
+    table for §8.3, §8.3.1, §8.5, §8.6, §8.7, §10.4.2, §11.1
+    operator gates), `Duet.PR` (§9.4 PR title and body),
+    `Duet.GithubReview` (parser for `gh api .../pulls/<n>/reviews`
+    with §11.1 latest-non-dismissed-per-identity reduction),
+    `Duet.SuperPower` (§8.5 mode + path resolver, validate_config),
+    and `Duet.PRConflict` (§8.3.1 mergeability decider + event attrs).
+    All pure, no orchestrator wiring yet.
 
 Next slice:
 
