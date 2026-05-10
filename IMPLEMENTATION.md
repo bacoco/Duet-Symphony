@@ -268,7 +268,7 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
-| `test/symphony_elixir/core_test.exs` | first runner slice | added assertions covering `duet.enabled` defaulting and parsing |
+| `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows after the same upstream timing flake failed on pinned GitHub Actions |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
 
 ### New Duet-only files (no upstream conflict expected)
@@ -329,23 +329,26 @@ retry-scheduling test. The failure is not treated as a functional regression in
 the imported baseline as long as it remains isolated to this test and the CI
 baseline passes on the pinned Erlang/Elixir versions.
 
-CI validation:
+Initial CI validation:
 
 - Workflow: `Elixir Baseline`
 - Run ID: `25627600029`
 - Commit: `2027f152a7dc4af099d9cc9c8ea151fba3c8c881`
 - Result: pass
 
-No `elixir/` source or fixture was modified after the subtree import. Do not
-start the rename/config/runner-selector slice if future baseline CI runs fail,
-or if the local failure expands beyond this isolated timing assertion.
+Later CI reclassification:
 
-If CI fails, re-classify this baseline failure as one of:
+- Workflow: `Elixir Baseline`
+- Run ID: `25628886607`
+- Commit: `c1d1689c3ad0bbf78bf8be3f4678a531770fc80e`
+- Result: fail on the same abnormal worker retry timing assertion, with
+  `remaining_ms = 39020` against lower bound `39500`.
 
-- an environment-specific timing flaky that may be annotated or tolerated;
-- a CI-only pass that should be validated in GitHub Actions before proceeding;
-- an upstream test issue to patch locally with a clearly attributed delta; or
-- a true baseline blocker.
+Classification update: upstream timing-flaky requiring a local test tolerance
+delta. The test windows in `test/symphony_elixir/core_test.exs` were widened
+without changing production retry logic. This is a test-only Duet local delta
+and should be reviewed on each upstream sync. If future runs fail outside these
+same retry timing assertions, stop and re-classify before continuing.
 
 ## Post-Import Root NOTICE Text
 
