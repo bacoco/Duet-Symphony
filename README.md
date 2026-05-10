@@ -6,8 +6,9 @@ agent routing.
 Status: **implementation baseline imported**. The full design lives in
 [`spec/SPEC.md`](./spec/SPEC.md). The current Elixir slice preserves Symphony's
 default single-Codex behavior, renames the binary to `duet-symphony`, parses a
-minimal `duet:` config block, and adds a tested `Duet.PairRunner` stub. Full
-Claude/Codex duet orchestration is not implemented yet.
+minimal `duet:` config block, extracts shared runner workspace lifecycle, and
+adds a tested `Duet.PairRunner` stub. Full Claude/Codex duet orchestration is
+not implemented yet.
 
 ## In one paragraph
 

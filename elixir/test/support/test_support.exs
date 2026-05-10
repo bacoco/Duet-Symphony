@@ -15,6 +15,7 @@ defmodule SymphonyElixir.TestSupport do
       alias SymphonyElixir.Linear.Issue
       alias SymphonyElixir.Orchestrator
       alias SymphonyElixir.PromptBuilder
+      alias SymphonyElixir.RunnerRuntime
       alias SymphonyElixir.StatusDashboard
       alias SymphonyElixir.Tracker
       alias SymphonyElixir.Workflow

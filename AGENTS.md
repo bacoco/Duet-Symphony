@@ -32,6 +32,9 @@ as the artifact and convergence substrate.
   `duet-symphony`, `Config.Schema` parses a minimal `duet:` block,
   `RunnerSelector` keeps `AgentRunner` as the default compatibility runner,
   and `Duet.PairRunner.run/3` is a tested `{:error, :not_implemented}` stub.
+- The shared runner runtime slice is also in place: `RunnerRuntime` owns
+  worker-host selection, workspace creation, runtime notifications, and
+  run hooks for both `AgentRunner` and `Duet.PairRunner`.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -72,9 +75,9 @@ Completed first slice:
 
 Next slice:
 
-1. Extract shared workspace lifecycle setup from `AgentRunner` before giving
-   `Duet.PairRunner` real behavior. Do not duplicate workspace creation, hook
-   execution, remote-worker support, or cleanup logic inside `PairRunner`.
+1. Add Duet phase/routing state behind `duet.enabled` while keeping
+   `AgentRunner` as the default compatibility path. Start with data structures
+   and no external Claude/Codex calls.
 
 Subsequent slices:
 

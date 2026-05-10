@@ -190,12 +190,33 @@ The first slice is complete.
 > [!WARNING]
 > Do not enable `duet: enabled: true` in a production `WORKFLOW.md` until
 > the pair loop is implemented. While `Duet.PairRunner` is a stub, the
-> orchestrator dispatch wrapper raises on `{:error, :not_implemented}`,
-> which crashes the issue task and triggers the standard retry policy.
-> Every claimed issue will burn the retry budget without producing work.
+> shared runner runtime can create workspaces and run hooks before returning
+> `{:error, :not_implemented}`. The orchestrator dispatch wrapper then raises,
+> which crashes the issue task and triggers the standard retry policy. Every
+> claimed issue will burn the retry budget without producing useful work.
 
-The next slice must extract or share `AgentRunner`'s workspace lifecycle before
-adding real Claude/Codex behavior to `Duet.PairRunner`.
+The shared runtime extraction below completes the workspace lifecycle
+prerequisite before real Claude/Codex behavior is added to `Duet.PairRunner`.
+
+## Shared Runner Runtime Status
+
+The shared workspace lifecycle extraction is complete.
+
+- `RunnerRuntime.run/5` now owns worker-host selection, workspace creation,
+  worker runtime notifications, `before_run` hooks, and `after_run` hooks.
+- `AgentRunner` delegates to `RunnerRuntime` and retains ownership of Codex
+  App Server sessions, prompt construction, continuation turns, and active issue
+  refresh.
+- `Duet.PairRunner` delegates to `RunnerRuntime` before returning its current
+  `{:error, :not_implemented}` stub result. This proves the future pair runner
+  will use the same workspace and hook semantics as the Symphony-compatible
+  runner.
+- Verification covers `PairRunner` creating a workspace, emitting
+  `worker_runtime_info`, and running `after_create`, `before_run`, and
+  `after_run` hooks before the stub returns.
+
+The next implementation slice can now focus on Duet phase/routing state instead
+of re-solving workspace lifecycle.
 
 ## Local Modifications Inside elixir/
 
@@ -208,16 +229,18 @@ this section in sync with the modifications applied per slice.
 
 | File | Slice | Reason |
 |------|-------|--------|
-| `mix.exs` | first runner slice | escript `name` and `path` renamed `symphony` → `duet-symphony` |
+| `mix.exs` | first runner slice | escript `name` and `path` renamed `symphony` → `duet-symphony`; shared runtime added to coverage ignore list like `AgentRunner`/`Workspace` |
 | `lib/symphony_elixir/cli.ex` | first runner slice | usage message updated to new binary name |
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
 | `lib/symphony_elixir/config/schema.ex` | first runner slice | added embedded `Duet` schema with `enabled` boolean field |
+| `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
 | `test/support/test_support.exs` | first runner slice | added `duet_yaml` helper for emitting `duet:` blocks in test config fixtures |
-| `test/symphony_elixir/core_test.exs` | first runner slice | added two assertions covering `duet.enabled` defaulting and parsing |
+| `test/symphony_elixir/core_test.exs` | first runner slice | added assertions covering `duet.enabled` defaulting and parsing |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
 
 ### New Duet-only files (no upstream conflict expected)
 
+- `lib/symphony_elixir/runner_runtime.ex`
 - `lib/symphony_elixir/runner_selector.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/runner_selector_test.exs`
