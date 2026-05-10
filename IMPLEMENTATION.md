@@ -215,10 +215,16 @@ retry-scheduling test. The failure is not treated as a functional regression in
 the imported baseline as long as it remains isolated to this test and the CI
 baseline passes on the pinned Erlang/Elixir versions.
 
+CI validation:
+
+- Workflow: `Elixir Baseline`
+- Run ID: `25627600029`
+- Commit: `2027f152a7dc4af099d9cc9c8ea151fba3c8c881`
+- Result: pass
+
 No `elixir/` source or fixture was modified after the subtree import. Do not
-start the rename/config/runner-selector slice until GitHub Actions validates
-the baseline, or until a reviewer explicitly accepts a different documented
-gate.
+start the rename/config/runner-selector slice if future baseline CI runs fail,
+or if the local failure expands beyond this isolated timing assertion.
 
 If CI fails, re-classify this baseline failure as one of:
 
