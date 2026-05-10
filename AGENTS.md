@@ -84,15 +84,15 @@ as the artifact and convergence substrate.
   `summary_word_target/2` returns the adaptive word budget per §8.4.
   `Duet.Transcripts.write/6` persists the §13.2 per-turn prompt+response
   to `<log_dir>/tasks/<task_id>/transcripts/<phase>-<cycle>-<actor>.md`.
-  `PairRunner` now consumes these pieces for the first Codex SPEC Author
-  turn when the selected profile assigns SPEC authoring to `codex`.
-- The first Codex App Server pair-loop slice is in place:
-  `PairRunner` builds the SPEC Author prompt, records `turn_request`,
-  dispatches via the configured `TurnDriver`, writes the transcript,
-  parses the trailer through `Turn.record_response/6`, and then stops
-  with `{:error, :reviewer_not_implemented}` because the reviewer turn
-  and convergence loop are not implemented yet. Profiles whose SPEC
-  Author is not Codex still use the `{:error, :not_implemented}` stub.
+  `PairRunner` now consumes these pieces for the first real SPEC
+  Author→Reviewer loop.
+- The first wave-8 PairRunner slice is in place:
+  `PairRunner` resolves the selected SPEC author/reviewer actors, selects
+  their `TurnDriver`s, records `turn_request` / `turn_response`, writes
+  transcripts, evaluates `Duet.ConvergenceOrchestrator`, continues cycles
+  after reviewer `REQUEST_CHANGES`, and emits `phase_frozen` on SPEC
+  convergence. A frozen SPEC currently stops future continuation dispatch
+  with `{:error, :plan_not_implemented}` because PLAN is not wired yet.
 - The convergence-engine pure helpers are in place:
   `Duet.Convergence` implements the §9.3 split-signal mapping and the
   §10.2 convergence rule (both APPROVE on same tree-hash);
@@ -253,21 +253,24 @@ Completed first slice:
     `--print --output-format stream-json` command shape, sends prompts on
     stdin, parses assistant/result stream events into response text, and
     exposes an injectable runner for tests. Not wired into `PairRunner` yet.
+24. Wire the first real SPEC phase pair loop in `PairRunner`: configured
+    Author and Reviewer actors dispatch through `TurnDriver`, responses are
+    recorded/transcribed, convergence/cycle-cap/pathological helpers decide
+    continue/freeze/fail, and converged SPEC emits `phase_frozen`. PLAN is
+    still not implemented.
 
 Next slice:
 
-1. Add the reviewer half of the SPEC pair loop: dispatch the configured
-   reviewer actor after a successful Author response, record its trailer,
-   evaluate `Duet.Convergence`, and either freeze SPEC, continue to the
-   next cycle, or hit `Duet.CycleCap` per spec §10.
+1. Extend the phase driver from SPEC to PLAN: start PLAN after a frozen SPEC,
+   reuse the same Author/Reviewer loop, preserve idempotent recovery from
+   existing events, and stop before CODE wiring.
 
 Subsequent slices:
 
 1. Add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
-2. Wire `Duet.TurnDrivers.ClaudeCode` into the reviewer/author actor
-   selection once the PairRunner phase loop is implemented; do not rely on
-   fragile TTY automation unless no better option exists.
+2. Keep Claude Code structured print/stream-json as the Claude runtime path;
+   do not rely on fragile TTY automation unless no better option exists.
 3. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 

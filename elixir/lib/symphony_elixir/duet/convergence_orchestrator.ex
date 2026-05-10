@@ -22,8 +22,8 @@ defmodule SymphonyElixir.Duet.ConvergenceOrchestrator do
           {:freeze, :converged | :forced | :operator_override_author | :operator_override_reviewer, String.t()}
           | {:continue, Convergence.not_converged_reason()}
           | {:awaiting_operator, :phase_cap_escalation}
-          | {:fail, atom()}
           | {:fail, :pathological_disagreement, [String.t()]}
+          | {:fail, :code_phase_unresolved | :no_reviewer_revision | :no_revision | :unsupported_phase}
 
   @type opts :: [
           phase: String.t(),

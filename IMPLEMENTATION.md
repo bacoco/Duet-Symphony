@@ -400,14 +400,13 @@ turn now consumes those seams through `PairRunner`.
   and appends a `[truncated to <max> chars per spec §14]` marker when
   truncation occurs. This enforces the §14 "operator input MUST be
   bounded in length" requirement at the prompt-rendering layer.
-- The scaffolding slices do not open PRs or emit additional event kinds;
-  `PairRunner` now consumes them for the first Codex SPEC Author turn.
+- The scaffolding slices do not open PRs. `PairRunner` now consumes them
+  for the first real SPEC Author→Reviewer loop.
 
-## Codex App Server Pair-Loop Status
+## SPEC Pair-Loop Status
 
-The first Codex runtime slice is complete, but only for the SPEC Author
-half-turn when the selected routing profile assigns SPEC authoring to
-`codex`.
+The first wave-8 runtime slice is complete for the SPEC phase only.
+PLAN/CODE/REVIEW remain future slices.
 
 - `SymphonyElixir.Duet.TurnDrivers.CodexAppServer` implements
   `Duet.TurnDriver` on top of the existing `SymphonyElixir.Codex.AppServer`.
@@ -417,25 +416,31 @@ half-turn when the selected routing profile assigns SPEC authoring to
   workspace validation, dynamic tool handling, remote worker support, and
   orchestrator update forwarding) while collecting
   `codex/event/agent_message*` stream deltas into a single response string.
-- `SymphonyElixir.Duet.PairRunner` now resolves the active routing profile,
-  and when the SPEC Author is `codex`, it builds a `Duet.PhasePrompt`,
-  records `turn_request`, dispatches the selected `TurnDriver`, writes
-  the §13.2 transcript, parses the response via `Turn.record_response/6`,
-  and then records `task_failed` with `reason = "reviewer_not_implemented"`.
-- Profiles whose SPEC Author is not Codex keep the earlier stub behavior:
-  initial state events are emitted idempotently, a single `task_failed`
-  with `reason = "not_implemented"` is recorded, and the runner returns
-  `{:error, :not_implemented}`.
-- A previously recorded SPEC/cycle-1 Codex `turn_response` is treated as
-  already dispatched on retry; PairRunner does not re-run Codex for that
-  same turn and returns `{:error, :reviewer_not_implemented}`.
-- The reviewer half-turn, convergence evaluation, cycle continuation,
-  phase freeze, PR operations, and Claude runtime are still future slices.
+- `SymphonyElixir.Duet.PairRunner` resolves the active routing profile,
+  extracts the configured SPEC Author and first Reviewer, picks each actor's
+  `TurnDriver` (`codex` → Codex App Server, `claude` → Claude Code, or test
+  overrides), builds `Duet.PhasePrompt`s, records `turn_request`, dispatches
+  turns, writes §13.2 transcripts, and parses responses via
+  `Turn.record_response/6`.
+- The SPEC loop is recovery-aware at the event level: existing
+  `turn_response` events are reused, `turn_request` events are not duplicated,
+  and each cycle writes one `phase_started` event.
+- `Duet.ConvergenceOrchestrator` decides the next action after every
+  Author→Reviewer round trip. Reviewer `REQUEST_CHANGES` continues to the
+  next cycle with reviewer feedback in the next Author prompt; matching
+  APPROVE trailers on the same tree hash emit `phase_frozen` with
+  `mode = consensus`; cap/pathological failures emit the corresponding
+  failure/escalation events.
+- A frozen SPEC currently returns `{:error, :plan_not_implemented}` on the
+  next continuation dispatch. This keeps the first wave-8 slice honest:
+  SPEC convergence exists, but PLAN is not yet wired.
+- PR operations, phase branch merges, PLAN/CODE/REVIEW phase dispatch, and
+  human/verification/SuperPower gates are still future wave-8 slices.
 
 ## Claude Code Turn Driver Status
 
 The Claude Code runtime adapter is present behind the same `Duet.TurnDriver`
-behaviour, but it is not wired into `PairRunner` yet.
+behaviour and is now selected by `PairRunner` when a routed actor is `claude`.
 
 - `SymphonyElixir.Duet.TurnDrivers.ClaudeCode` invokes Claude Code with the
   spec-backed non-interactive command shape:
@@ -451,9 +456,7 @@ behaviour, but it is not wired into `PairRunner` yet.
   runner seams: production shells out to the real `claude` binary, while tests
   inject a deterministic in-process runner. No tests invoke a real Claude
   runtime.
-- This slice intentionally does not implement Claude GitHub bot mode and does
-  not alter PairRunner actor selection. Wiring Claude into the reviewer/author
-  side of the loop belongs to the next PairRunner phase-driver slice.
+- This slice intentionally does not implement Claude GitHub bot mode.
 
 ## Convergence Engine Status
 

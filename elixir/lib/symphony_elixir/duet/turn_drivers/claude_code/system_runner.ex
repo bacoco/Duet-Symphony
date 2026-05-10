@@ -24,20 +24,18 @@ defmodule SymphonyElixir.Duet.TurnDrivers.ClaudeCode.SystemRunner do
   end
 
   defp do_run(executable, args, input, opts) do
-    cmd_opts = build_cmd_opts(input, opts)
+    port =
+      Port.open(
+        {:spawn_executable, executable},
+        build_port_opts(args, opts)
+      )
 
-    case System.cmd(executable, args, cmd_opts) do
-      {stdout, 0} ->
-        {:ok, stdout}
-
-      {output, status} when is_integer(status) ->
-        {:error, {:exit_status, status, output}}
-    end
+    send(port, {self(), {:command, input}})
+    send(port, {self(), :eof})
+    collect_output(port, [])
   end
 
-  defp build_cmd_opts(input, opts) do
-    base = [stderr_to_stdout: true, input: input]
-
+  defp build_port_opts(args, opts) do
     opts
     |> Keyword.delete(:executable)
     |> Keyword.delete(:extra_args)
@@ -45,8 +43,9 @@ defmodule SymphonyElixir.Duet.TurnDrivers.ClaudeCode.SystemRunner do
     |> Keyword.delete(:resume)
     |> Keyword.delete(:permission_mode)
     |> Keyword.delete(:runner)
+    |> Keyword.take([:cwd])
     |> maybe_put_cd()
-    |> Keyword.merge(base)
+    |> Kernel.++([:binary, :exit_status, :stderr_to_stdout, args: args])
   end
 
   defp maybe_put_cd(opts) do
@@ -54,10 +53,23 @@ defmodule SymphonyElixir.Duet.TurnDrivers.ClaudeCode.SystemRunner do
       {:ok, cwd} when is_binary(cwd) and cwd != "" ->
         opts
         |> Keyword.delete(:cwd)
-        |> Keyword.put(:cd, cwd)
+        |> Keyword.put(:cd, String.to_charlist(cwd))
 
       _ ->
         opts
+    end
+  end
+
+  defp collect_output(port, chunks) do
+    receive do
+      {^port, {:data, data}} ->
+        collect_output(port, [data | chunks])
+
+      {^port, {:exit_status, 0}} ->
+        {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      {^port, {:exit_status, status}} ->
+        {:error, {:exit_status, status, chunks |> Enum.reverse() |> IO.iodata_to_binary()}}
     end
   end
 end

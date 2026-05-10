@@ -50,18 +50,16 @@ defmodule SymphonyElixir.Duet.GhCli.SystemRunner do
     end
   end
 
+  @system_cmd_keys [:cd, :env, :stderr_to_stdout, :parallelism, :into, :lines]
+
   defp build_cmd_opts(opts) do
-    base = [stderr_to_stdout: true]
+    {cwd, rest} = Keyword.pop(opts, :cwd)
 
-    case Keyword.fetch(opts, :cwd) do
-      {:ok, cwd} when is_binary(cwd) ->
-        opts
-        |> Keyword.delete(:cwd)
-        |> Keyword.merge(base)
-        |> Keyword.put(:cd, cwd)
+    base =
+      rest
+      |> Keyword.take(@system_cmd_keys)
+      |> Keyword.put(:stderr_to_stdout, true)
 
-      _ ->
-        Keyword.merge(opts, base)
-    end
+    if is_binary(cwd), do: Keyword.put(base, :cd, cwd), else: base
   end
 end
