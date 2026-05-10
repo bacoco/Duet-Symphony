@@ -127,7 +127,9 @@ defmodule SymphonyElixir.Duet.PairRunner do
             reviewer_role: reviewer_role
           })
 
-        with :ok <- maybe_ensure_phase_branch(ctx) do
+        with :ok <- maybe_ensure_phase_branch(ctx),
+             {:ok, ctx} <- maybe_open_phase_pr(ctx),
+             {:ok, ctx} <- maybe_setup_phase_workspace(ctx) do
           run_cycle(ctx, 1, [], %{author_last: nil, reviewer_last_authored: nil}, nil)
         end
 
@@ -254,7 +256,8 @@ defmodule SymphonyElixir.Duet.PairRunner do
          {:ok, response_text} <- driver.drive_turn(prompt, driver_opts(ctx, actor)),
          {:ok, _path} <- Transcripts.write(ctx.issue, ctx.phase, cycle, actor, prompt, response_text),
          {:ok, turn, _issues} <-
-           Turn.record_response(ctx.issue, ctx.phase, cycle, actor, response_text, tree_hash: tree_hash) do
+           Turn.record_response(ctx.issue, ctx.phase, cycle, actor, response_text, tree_hash: tree_hash),
+         :ok <- maybe_post_turn_to_pr(ctx, role, turn, response_text) do
       {:ok, turn, response_text}
     else
       {:error, reason} -> {:error, {:turn_failed, ctx.phase, actor, cycle, reason}}
@@ -425,7 +428,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp driver_opts(ctx, "codex") do
     ctx.opts
     |> Keyword.get(:turn_driver_opts, [])
-    |> Keyword.put_new(:workspace, ctx.workspace)
+    |> Keyword.put_new(:workspace, effective_workspace(ctx))
     |> Keyword.put_new(:issue, ctx.issue)
     |> Keyword.put_new(:worker_host, ctx.worker_host)
     |> Keyword.put_new(:on_message, codex_message_handler(ctx.update_recipient, ctx.issue))
@@ -434,7 +437,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp driver_opts(ctx, "claude") do
     ctx.opts
     |> Keyword.get(:turn_driver_opts, [])
-    |> Keyword.put_new(:workspace, ctx.workspace)
+    |> Keyword.put_new(:workspace, effective_workspace(ctx))
   end
 
   defp codex_message_handler(recipient, issue) do
@@ -725,6 +728,85 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp maybe_ensure_phase_branch(_ctx), do: :ok
+
+  defp maybe_open_phase_pr(%{side_effects: true} = ctx) do
+    case resolve_phase_pr_number(ctx) do
+      n when is_integer(n) ->
+        {:ok, Map.put(ctx, :pr_number, n)}
+
+      nil ->
+        pr_ctx =
+          %{
+            task_id: task_id(ctx.issue),
+            phase: ctx.phase,
+            issue_title: Map.get(ctx.issue, :title) || "",
+            issue_description: Map.get(ctx.issue, :description) || "",
+            workspace: ctx.workspace,
+            cycle: 1
+          }
+          |> maybe_put_gh_runner(ctx)
+
+        case PRLifecycle.open_phase_pr(pr_ctx) do
+          {:ok, number} -> {:ok, Map.put(ctx, :pr_number, number)}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp maybe_open_phase_pr(ctx), do: {:ok, ctx}
+
+  defp maybe_setup_phase_workspace(%{side_effects: true, phase: "REVIEW"} = ctx) do
+    case BranchHarness.phase_workspace(task_id(ctx.issue), "CODE", branch_harness_opts(ctx)) do
+      {:ok, path} -> {:ok, Map.put(ctx, :phase_workspace, path)}
+      {:error, _} -> {:ok, ctx}
+    end
+  end
+
+  defp maybe_setup_phase_workspace(%{side_effects: true} = ctx) do
+    case BranchHarness.phase_workspace(task_id(ctx.issue), ctx.phase, branch_harness_opts(ctx)) do
+      {:ok, path} -> {:ok, Map.put(ctx, :phase_workspace, path)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_setup_phase_workspace(ctx), do: {:ok, ctx}
+
+  defp maybe_post_turn_to_pr(ctx, role, turn, response_text) do
+    if ctx.side_effects and is_integer(ctx[:pr_number]) do
+      post_turn_to_pr(ctx, role, turn, response_text)
+    else
+      :ok
+    end
+  end
+
+  defp post_turn_to_pr(ctx, role, _turn, response_text) when role in [:author, :coder_ack] do
+    PRLifecycle.post_author_trailer(ctx.pr_number, response_text, pr_lifecycle_opts(ctx))
+  end
+
+  defp post_turn_to_pr(ctx, role, turn, response_text) when role in [:reviewer, :review_reviewer] do
+    verdict = if turn.verdict == :approve, do: :approve, else: :request_changes
+    PRLifecycle.submit_reviewer_verdict(ctx.pr_number, verdict, response_text, pr_lifecycle_opts(ctx))
+  end
+
+  defp post_turn_to_pr(_ctx, _role, _turn, _response_text), do: :ok
+
+  defp effective_workspace(ctx), do: Map.get(ctx, :phase_workspace) || ctx.workspace
+
+  defp pr_lifecycle_opts(ctx) do
+    opts = [cwd: effective_workspace(ctx)]
+
+    case Keyword.get(ctx.opts, :gh_runner) do
+      runner when is_atom(runner) and not is_nil(runner) -> Keyword.put(opts, :runner, runner)
+      _ -> opts
+    end
+  end
+
+  defp maybe_put_gh_runner(pr_ctx, ctx) do
+    case Keyword.get(ctx.opts, :gh_runner) do
+      runner when is_atom(runner) and not is_nil(runner) -> Map.put(pr_ctx, :runner, runner)
+      _ -> pr_ctx
+    end
+  end
 
   defp maybe_execute_freeze_side_effects(%{side_effects: true} = ctx) do
     task_id = task_id(ctx.issue)

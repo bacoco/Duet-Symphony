@@ -7,7 +7,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   alias Plug.Conn
   alias SymphonyElixir.Config
-  alias SymphonyElixir.Duet.RoutingSelection
+  alias SymphonyElixir.Duet.{OperatorResolution, RoutingSelection, TaskState}
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
   @spec state(Conn.t(), map()) :: Conn.t()
@@ -61,6 +61,48 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     end
   end
 
+  @spec duet_task_state(Conn.t(), map()) :: Conn.t()
+  def duet_task_state(conn, %{"task_id" => task_id}) do
+    case TaskState.recover(task_id, duet_settings()) do
+      {:ok, state} ->
+        json(conn, task_state_payload(state))
+
+      {:error, reason} ->
+        error_response(conn, 404, "task_not_found", inspect(reason))
+    end
+  end
+
+  @spec duet_resolve_gate(Conn.t(), map()) :: Conn.t()
+  def duet_resolve_gate(conn, %{"task_id" => task_id} = params) do
+    decision = parse_decision(Map.get(params, "decision"))
+
+    case decision do
+      nil ->
+        error_response(conn, 422, "invalid_decision", "Missing or invalid decision parameter")
+
+      decision_atom ->
+        case OperatorResolution.resolve(task_id, decision_atom) do
+          {:ok, result} ->
+            SymphonyElixirWeb.ObservabilityPubSub.broadcast_update()
+            json(conn, %{ok: true, action: result.action, reason: result.reason})
+
+          {:error, :not_awaiting_operator} ->
+            error_response(conn, 409, "not_awaiting_operator", "Task is not in an awaiting_operator state")
+
+          {:error, {:illegal_decision, decision, reason}} ->
+            error_response(
+              conn,
+              422,
+              "illegal_decision",
+              "Decision #{decision} is not legal for reason #{reason}"
+            )
+
+          {:error, reason} ->
+            error_response(conn, 422, "resolution_failed", inspect(reason))
+        end
+    end
+  end
+
   @spec method_not_allowed(Conn.t(), map()) :: Conn.t()
   def method_not_allowed(conn, _params) do
     error_response(conn, 405, "method_not_allowed", "Method not allowed")
@@ -83,5 +125,42 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   defp snapshot_timeout_ms do
     Endpoint.config(:snapshot_timeout_ms) || 15_000
+  end
+
+  defp duet_settings do
+    Config.settings!().duet
+  rescue
+    _ -> nil
+  end
+
+  @valid_decisions ~w(approve request_changes continue fail approve_author approve_reviewer disable_enforcement)
+
+  defp parse_decision(decision) when decision in @valid_decisions do
+    String.to_existing_atom(decision)
+  end
+
+  defp parse_decision(_), do: nil
+
+  defp task_state_payload(%TaskState.State{} = state) do
+    %{
+      task_id: state.task_id,
+      status: state.status,
+      current_phase: state.current_phase,
+      routing_status: state.routing_status,
+      awaiting_operator_reason: state.awaiting_operator_reason,
+      events_count: state.events_count,
+      phases:
+        Map.new(state.phases, fn {name, phase} ->
+          {name,
+           %{
+             status: phase.status,
+             cycle: phase.cycle,
+             actor: phase.actor,
+             verdict: phase.verdict,
+             pr_number: phase.pr_number,
+             tree_hash: phase.tree_hash
+           }}
+        end)
+    }
   end
 end
