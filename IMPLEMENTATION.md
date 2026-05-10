@@ -218,6 +218,22 @@ The shared workspace lifecycle extraction is complete.
 The next implementation slice can now focus on Duet phase/routing state instead
 of re-solving workspace lifecycle.
 
+## Duet Routing Config Status
+
+The first routing/config slice is complete.
+
+- `Config.Schema.Duet` now parses the core Duet phase-control fields:
+  `max_cycles_per_phase`, `phase_turn_timeout_ms`,
+  `phase_total_timeout_ms`, `code_phase_cap_policy`, `pause_on_freeze`,
+  `agent_menu`, `agent_routing`, and `human_checkpoints`.
+- `SymphonyElixir.Duet.Routing` resolves the effective routing profile from
+  `duet.agent_routing`, including built-in `duet_balanced`,
+  `codex_only_dev`, and `claude_only_dev` profiles.
+- Full Duet profiles are validated to require distinct Claude/Codex machine
+  signals for SPEC, PLAN, and CODE. Profiles that intentionally skip reviewers
+  remain valid only as degraded profiles.
+- No external Claude/Codex calls are introduced in this slice.
+
 ## Local Modifications Inside elixir/
 
 The files listed below carry Duet-specific deltas on top of the upstream
@@ -229,12 +245,12 @@ this section in sync with the modifications applied per slice.
 
 | File | Slice | Reason |
 |------|-------|--------|
-| `mix.exs` | first runner slice | escript `name` and `path` renamed `symphony` → `duet-symphony`; shared runtime added to coverage ignore list like `AgentRunner`/`Workspace` |
+| `mix.exs` | routing config slice | escript `name` and `path` renamed `symphony` → `duet-symphony`; operational runner/routing modules added to coverage ignore list like `AgentRunner`/`Workspace` |
 | `lib/symphony_elixir/cli.ex` | first runner slice | usage message updated to new binary name |
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
-| `lib/symphony_elixir/config/schema.ex` | first runner slice | added embedded `Duet` schema with `enabled` boolean field |
+| `lib/symphony_elixir/config/schema.ex` | routing config slice | added embedded `Duet` schema with core phase/routing fields and routing validation |
 | `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
-| `test/support/test_support.exs` | first runner slice | added `duet_yaml` helper for emitting `duet:` blocks in test config fixtures |
+| `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
 | `test/symphony_elixir/core_test.exs` | first runner slice | added assertions covering `duet.enabled` defaulting and parsing |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
 
@@ -242,8 +258,10 @@ this section in sync with the modifications applied per slice.
 
 - `lib/symphony_elixir/runner_runtime.ex`
 - `lib/symphony_elixir/runner_selector.ex`
+- `lib/symphony_elixir/duet/routing.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/runner_selector_test.exs`
+- `test/symphony_elixir/duet_routing_test.exs`
 
 ## Baseline Test Status
 

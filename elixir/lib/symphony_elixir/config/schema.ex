@@ -204,15 +204,57 @@ defmodule SymphonyElixir.Config.Schema do
     use Ecto.Schema
     import Ecto.Changeset
 
+    alias SymphonyElixir.Duet.Routing
+
     @primary_key false
     embedded_schema do
       field(:enabled, :boolean, default: false)
+      field(:max_cycles_per_phase, :integer, default: 5)
+      field(:phase_turn_timeout_ms, :integer, default: 600_000)
+      field(:phase_total_timeout_ms, :integer, default: 7_200_000)
+      field(:code_phase_cap_policy, :string, default: "escalate")
+      field(:pause_on_freeze, :boolean, default: false)
+      field(:agent_menu, :map, default: %{"enabled" => true, "require_selection_before_dispatch" => false})
+      field(:agent_routing, :map, default: Routing.default_agent_routing_config())
+
+      field(:human_checkpoints, :map,
+        default: %{
+          "enabled" => false,
+          "default_mode" => "blocking",
+          "phases" => %{"spec" => false, "plan" => false, "code" => false, "review" => false},
+          "timeout_ms" => nil
+        }
+      )
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:enabled])
+      |> cast(attrs, [
+        :enabled,
+        :max_cycles_per_phase,
+        :phase_turn_timeout_ms,
+        :phase_total_timeout_ms,
+        :code_phase_cap_policy,
+        :pause_on_freeze,
+        :agent_menu,
+        :agent_routing,
+        :human_checkpoints
+      ])
+      |> validate_number(:max_cycles_per_phase, greater_than: 0)
+      |> validate_number(:phase_turn_timeout_ms, greater_than: 0)
+      |> validate_number(:phase_total_timeout_ms, greater_than: 0)
+      |> validate_inclusion(:code_phase_cap_policy, ["escalate", "forced", "fail"])
+      |> validate_agent_routing()
+    end
+
+    defp validate_agent_routing(changeset) do
+      validate_change(changeset, :agent_routing, fn :agent_routing, agent_routing ->
+        case Routing.validate_config(agent_routing) do
+          :ok -> []
+          {:error, message} -> [agent_routing: message]
+        end
+      end)
     end
   end
 

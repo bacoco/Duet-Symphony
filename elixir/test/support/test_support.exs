@@ -115,6 +115,7 @@ defmodule SymphonyElixir.TestSupport do
           codex_turn_timeout_ms: 3_600_000,
           codex_read_timeout_ms: 5_000,
           codex_stall_timeout_ms: 300_000,
+          duet_yaml: nil,
           duet_enabled: nil,
           hook_after_create: nil,
           hook_before_run: nil,
@@ -153,6 +154,7 @@ defmodule SymphonyElixir.TestSupport do
     codex_turn_timeout_ms = Keyword.get(config, :codex_turn_timeout_ms)
     codex_read_timeout_ms = Keyword.get(config, :codex_read_timeout_ms)
     codex_stall_timeout_ms = Keyword.get(config, :codex_stall_timeout_ms)
+    duet_raw_yaml = Keyword.get(config, :duet_yaml)
     duet_enabled = Keyword.get(config, :duet_enabled)
     hook_after_create = Keyword.get(config, :hook_after_create)
     hook_before_run = Keyword.get(config, :hook_before_run)
@@ -195,7 +197,7 @@ defmodule SymphonyElixir.TestSupport do
         "  turn_timeout_ms: #{yaml_value(codex_turn_timeout_ms)}",
         "  read_timeout_ms: #{yaml_value(codex_read_timeout_ms)}",
         "  stall_timeout_ms: #{yaml_value(codex_stall_timeout_ms)}",
-        duet_yaml(duet_enabled),
+        duet_yaml(duet_raw_yaml, duet_enabled),
         hooks_yaml(hook_after_create, hook_before_run, hook_after_run, hook_before_remove, hook_timeout_ms),
         observability_yaml(observability_enabled, observability_refresh_ms, observability_render_interval_ms),
         server_yaml(server_port, server_host),
@@ -259,9 +261,11 @@ defmodule SymphonyElixir.TestSupport do
     |> Enum.join("\n")
   end
 
-  defp duet_yaml(nil), do: nil
+  defp duet_yaml(raw_yaml, _enabled) when is_binary(raw_yaml), do: String.trim_trailing(raw_yaml)
 
-  defp duet_yaml(enabled) do
+  defp duet_yaml(_raw_yaml, nil), do: nil
+
+  defp duet_yaml(_raw_yaml, enabled) do
     [
       "duet:",
       "  enabled: #{yaml_value(enabled)}"

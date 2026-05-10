@@ -35,6 +35,9 @@ as the artifact and convergence substrate.
 - The shared runner runtime slice is also in place: `RunnerRuntime` owns
   worker-host selection, workspace creation, runtime notifications, and
   run hooks for both `AgentRunner` and `Duet.PairRunner`.
+- The first routing/config slice is in place: `Config.Schema.Duet` parses core
+  phase-control settings, and `SymphonyElixir.Duet.Routing` validates and
+  resolves built-in/custom routing profiles.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -75,25 +78,23 @@ Completed first slice:
 
 Next slice:
 
-1. Add Duet phase/routing state behind `duet.enabled` while keeping
-   `AgentRunner` as the default compatibility path. Start with data structures
-   and no external Claude/Codex calls.
+1. Add persistent Duet task/phase event state under `.duet/` behind
+   `duet.enabled`, using the resolved routing profile but still making no
+   external Claude/Codex calls.
 
 Subsequent slices:
 
 1. Add the initial operator routing menu/UI so a task can choose Claude,
    Codex, both, human checkpoints, or a custom per-phase profile before
-   dispatch.
-2. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
-   settings under a `duet:` front-matter key.
-3. Use Codex App Server for the Codex half first; add Codex Cloud as an
+   dispatch and persist that selected profile.
+2. Use Codex App Server for the Codex half first; add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
-4. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
+3. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
    Claude half; do not rely on fragile TTY automation unless no better option
    exists.
-5. Parse only the final `---DUET-TRAILER---` block from each agent response and
+4. Parse only the final `---DUET-TRAILER---` block from each agent response and
    persist structured events to `.duet/logs/tasks/<task_id>/events.jsonl`.
-6. Add optional SuperPower artifact support under `docs/superpowers/` for
+5. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 
 ## Known Design Constraints
