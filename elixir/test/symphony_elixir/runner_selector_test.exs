@@ -73,14 +73,24 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       assert File.read!(Path.join(workspace_path, "before_run.txt")) == "before"
       assert File.read!(Path.join(workspace_path, "after_run.txt")) == "after"
 
-      assert {:ok, [event]} = EventLog.read(issue)
-      assert event["kind"] == "agent_routing_selected"
-      assert event["task_id"] == "issue-duet-lifecycle"
-      assert event["profile_name"] == "duet_balanced"
-      assert event["mode"] == "full_duet"
-      assert event["degraded"] == false
-      assert event["phases"]["spec"]["author"] == "claude"
-      assert event["phases"]["spec"]["reviewers"] == ["codex"]
+      assert {:ok, [task_started, routing_selected, phase_started]} = EventLog.read(issue)
+
+      assert task_started["kind"] == "task_started"
+      assert task_started["task_id"] == "issue-duet-lifecycle"
+      assert task_started["identifier"] == "DUET-LIFE"
+
+      assert routing_selected["kind"] == "agent_routing_selected"
+      assert routing_selected["task_id"] == "issue-duet-lifecycle"
+      assert routing_selected["profile_name"] == "duet_balanced"
+      assert routing_selected["mode"] == "full_duet"
+      assert routing_selected["degraded"] == false
+      assert routing_selected["phases"]["spec"]["author"] == "claude"
+      assert routing_selected["phases"]["spec"]["reviewers"] == ["codex"]
+
+      assert phase_started["kind"] == "phase_started"
+      assert phase_started["task_id"] == "issue-duet-lifecycle"
+      assert phase_started["phase"] == "SPEC"
+      assert phase_started["cycle"] == 1
     after
       File.rm_rf(test_root)
     end

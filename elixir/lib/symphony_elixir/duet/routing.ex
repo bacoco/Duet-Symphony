@@ -37,6 +37,25 @@ defmodule SymphonyElixir.Duet.Routing do
 
   @type profile :: Profile.t()
 
+  @spec to_event_attrs(profile()) :: map()
+  def to_event_attrs(%Profile{} = profile) do
+    %{
+      profile_name: profile.name,
+      mode: profile.mode,
+      degraded: profile.degraded?,
+      phases:
+        Map.new(profile.phases, fn {phase, routing} ->
+          {phase,
+           %{
+             author: routing.author,
+             reviewers: routing.reviewers,
+             coder_ack: routing.coder_ack,
+             reviewer: routing.reviewer
+           }}
+        end)
+    }
+  end
+
   @spec default_agent_routing_config() :: map()
   def default_agent_routing_config do
     %{

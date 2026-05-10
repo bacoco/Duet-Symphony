@@ -237,16 +237,21 @@ The first routing/config slice is complete.
 
 ## Duet Event Log Status
 
-The first `.duet` persistence slice is complete.
+The first `.duet` persistence and recovery slices are complete.
 
 - `SymphonyElixir.Duet.EventLog` appends and reads newline-delimited JSON under
   `.duet/logs/tasks/<task_id>/events.jsonl`.
 - `--logs-root` now also relocates the Duet event log root to
   `<logs_root>/.duet/logs`.
-- `Duet.PairRunner` emits `agent_routing_selected` with the resolved profile
-  name, mode, degraded flag, and phase matrix before returning its current
+- `Duet.PairRunner` emits `task_started`, `agent_routing_selected`, and
+  `phase_started` for the initial `SPEC` phase before returning its current
   stub result.
-- No recovery logic or Claude/Codex runtime calls are introduced in this slice.
+- `SymphonyElixir.Duet.TaskState` reconstructs task status, current phase,
+  per-phase state, event count, and routing from the append-only log.
+- Recovery compares the recorded routing selection with the current resolved
+  `duet.agent_routing` profile and returns `{:routing_divergence, recorded,
+  current}` when they differ.
+- No Claude/Codex runtime calls are introduced in this slice.
 
 ## Local Modifications Inside elixir/
 
@@ -264,7 +269,6 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
 | `lib/symphony_elixir/config/schema.ex` | routing config slice | added embedded `Duet` schema with core phase/routing fields and routing validation |
 | `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
-| `lib/symphony_elixir/duet/pair_runner.ex` | event log slice | emits `agent_routing_selected` through the Duet event log before returning the stub result |
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
@@ -277,8 +281,10 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/runner_selector.ex`
 - `lib/symphony_elixir/duet/event_log.ex`
 - `lib/symphony_elixir/duet/routing.ex`
+- `lib/symphony_elixir/duet/task_state.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/duet_event_log_test.exs`
+- `test/symphony_elixir/duet_task_state_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
 

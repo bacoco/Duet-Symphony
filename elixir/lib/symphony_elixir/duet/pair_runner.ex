@@ -22,32 +22,25 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp run_pair_stub(_workspace, issue, _update_recipient, _opts, _worker_host) do
-    case emit_agent_routing_selected(issue) do
-      {:ok, _event} -> {:error, :not_implemented}
-      {:error, reason} -> {:error, {:agent_routing_event_failed, reason}}
+    case emit_initial_state_events(issue) do
+      :ok -> {:error, :not_implemented}
+      {:error, reason} -> {:error, {:initial_state_event_failed, reason}}
     end
   end
 
-  defp emit_agent_routing_selected(issue) do
-    with {:ok, profile} <- Routing.resolve(SymphonyElixir.Config.settings!().duet) do
-      EventLog.append(issue, "agent_routing_selected", %{
-        profile_name: profile.name,
-        mode: profile.mode,
-        degraded: profile.degraded?,
-        phases: profile_phases(profile)
-      })
+  defp emit_initial_state_events(issue) do
+    with {:ok, profile} <- Routing.resolve(SymphonyElixir.Config.settings!().duet),
+         {:ok, _event} <- EventLog.append(issue, "task_started", task_attrs(issue)),
+         {:ok, _event} <- EventLog.append(issue, "agent_routing_selected", Routing.to_event_attrs(profile)),
+         {:ok, _event} <- EventLog.append(issue, "phase_started", %{phase: "SPEC", cycle: 1}) do
+      :ok
     end
   end
 
-  defp profile_phases(%Routing.Profile{phases: phases}) do
-    Map.new(phases, fn {phase, routing} ->
-      {phase,
-       %{
-         author: routing.author,
-         reviewers: routing.reviewers,
-         coder_ack: routing.coder_ack,
-         reviewer: routing.reviewer
-       }}
-    end)
+  defp task_attrs(issue) do
+    %{
+      identifier: Map.get(issue, :identifier),
+      title: Map.get(issue, :title)
+    }
   end
 end
