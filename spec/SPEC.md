@@ -1,6 +1,6 @@
 # Duet-Symphony Specification
 
-**Version:** 0.3.0 (draft)
+**Version:** 0.4.0 (draft)
 **Status:** Design — not yet implemented
 **Audience:** implementers building a Symphony-compatible Duet fork
 
@@ -512,6 +512,49 @@ Reviewer, then skip Claude for PLAN review and bring it back for CODE review.
 That routing is valid as an operator-directed custom profile; skipped binding
 reviews are recorded as degraded for the affected phase.
 
+### 7.8 Tool profiles
+
+A tool profile constrains which capabilities an agent runtime may exercise
+during a given phase. The default is unrestricted: each agent has whatever
+tools its runtime provides. When `duet.tool_profiles` is configured, the
+orchestrator MUST inject the declared constraints into the agent's system
+prompt or sandbox policy before dispatching each turn.
+
+Tool profiles are motivated by the observation that heterogeneous tool access
+can improve pair-loop quality: an Author with full write access and a Reviewer
+restricted to read-only analysis produce more focused reviews than two agents
+with identical capabilities.
+
+```yaml
+duet:
+  tool_profiles:
+    enabled: false
+    profiles:
+      default:
+        # Unrestricted — agents keep their native tool set.
+        spec:   { author: all, reviewer: all }
+        plan:   { author: all, reviewer: all }
+        code:   { author: all, reviewer: all }
+        review: { coder_ack: all, reviewer: all }
+      strict_review:
+        # Reviewer cannot write files or push commits during CODE.
+        spec:   { author: all, reviewer: all }
+        plan:   { author: all, reviewer: all }
+        code:   { author: [file_write, git_push, shell], reviewer: [file_read, git_diff, shell_readonly] }
+        review: { coder_ack: [file_read, git_diff], reviewer: [file_read, git_diff, shell_readonly, web_search] }
+```
+
+Tool identifiers are implementation-defined (§17). Implementations MUST
+document which identifiers they support and how they map to runtime
+capabilities. If an agent requests a tool that its profile disallows, the
+orchestrator MUST block the call and include the denial in the agent's next
+prompt context.
+
+Tool profiles are orthogonal to agent routing profiles (§7.7). A `full_duet`
+routing profile MAY be combined with any tool profile. Tool profile violations
+do not affect convergence or phase ordering; they are sandboxing constraints,
+not convergence signals.
+
 ---
 
 ## 8. Phase Pipeline
@@ -741,6 +784,66 @@ machine role such as Author, Reviewer, or REVIEW reviewer.
 An advisory human checkpoint MAY be logged without blocking the task, but the
 default checkpoint mode is blocking when a phase is enabled.
 
+### 8.7 Verification gate (CI-in-the-loop)
+
+When `duet.verification_gate` is configured, the orchestrator injects external
+verification results — typically CI status checks, test suite output, or linter
+reports — into the pair-loop as a structured context block before the next
+Reviewer turn. This gives the Reviewer objective ground truth beyond the
+Author's claims, reducing the risk of homogeneous agreement bias where both
+agents approve code that fails tests.
+
+The gate fires **after the Author pushes commits** and **before the Reviewer's
+next turn is dispatched**:
+
+1. The orchestrator triggers the configured verification command or waits for
+   the configured GitHub status check context(s) to report.
+2. If the check times out (`verification_timeout_ms`), the orchestrator
+   proceeds with a `verification_timeout` warning injected into the Reviewer
+   prompt. The Reviewer MAY still approve or reject on other grounds.
+3. If checks complete, the orchestrator injects a structured block into the
+   Reviewer's prompt:
+   ```
+   ---DUET-VERIFICATION---
+   status: pass | fail | partial | timeout
+   checks:
+     - name: "ci/tests"
+       status: pass
+       summary: "247 tests passed, 0 failed"
+     - name: "ci/lint"
+       status: fail
+       summary: "3 ESLint errors in src/auth.ts"
+   ---END-DUET-VERIFICATION---
+   ```
+4. The Reviewer is instructed to weigh verification results but retains
+   autonomy: a `fail` status does not force `REQUEST_CHANGES`, and a `pass`
+   does not force `APPROVE`. The signal is informational, not binding.
+
+Configuration:
+
+```yaml
+duet:
+  verification_gate:
+    enabled: false
+    phases: [code]                     # which phases trigger verification
+    mode: github_checks                # github_checks | local_command | both
+    github_checks:
+      required_contexts: []            # list of check names; empty = wait for all
+      timeout_ms: 300000               # per-check timeout
+    local_command:
+      run: "npm test && npm run lint"  # shell command; cwd = workspace root
+      timeout_ms: 300000
+    inject_into: reviewer              # reviewer | both
+    on_timeout: warn                   # warn | block
+```
+
+When `on_timeout` is `block`, the orchestrator transitions the task to
+`awaiting_operator` with `reason = verification_timeout` instead of
+proceeding. The operator resumes via `duet resolve`.
+
+The orchestrator MUST emit a `verification_completed` event (§13.1) with the
+aggregated status and per-check results after each gate execution.
+
 ---
 
 ## 9. PR-as-Artifact Protocol
@@ -776,6 +879,33 @@ The CODE PR is held open across CODE *and* REVIEW phases; the merge into
 `duet-base/<task_id>` happens only on REVIEW freeze (§8.3). This is what
 makes the "fresh-context independent reviewer" property of REVIEW
 implementable without a separate REVIEW PR.
+
+#### 9.2.1 Draft PR lifecycle
+
+When `duet.pr_lifecycle.open_as_draft` is `true`, the orchestrator opens
+each phase PR as a GitHub **draft pull request** at the start of the phase,
+before the first Author turn. This gives operators real-time visibility into
+in-progress work without triggering branch protection rules or notifying
+downstream CI integrations that react only to ready-for-review PRs.
+
+The lifecycle is:
+
+1. **Phase start:** Orchestrator creates the phase sub-branch, pushes an
+   initial empty or scaffold commit, and opens a draft PR with the standard
+   title format (§9.4). The PR body includes the task description, active
+   routing profile, and a note that the PR is in-progress.
+2. **During the pair-loop:** Author commits are pushed to the phase
+   sub-branch. The draft PR updates automatically via GitHub's branch
+   tracking. Reviewer comments and Author trailers are posted as PR
+   comments per §9.3.
+3. **Phase freeze:** The orchestrator marks the PR as **ready for review**
+   (removes draft status) immediately before executing the freeze side
+   effects (§8.3). For the CODE PR that spans CODE and REVIEW phases, the
+   draft-to-ready transition happens at CODE freeze, before REVIEW begins.
+
+When `open_as_draft` is `false` (default), the orchestrator opens PRs as
+ready-for-review at the point it would otherwise create them, preserving
+current behavior.
 
 ### 9.3 PR review semantics — split signal model
 
@@ -1187,6 +1317,36 @@ duet:
     codex_handle: "codex"
     turn_timeout_ms: 600000
     poll_interval_ms: 15000
+  verification_gate:
+    enabled: false
+    phases: [code]                     # which phases trigger verification
+    mode: github_checks                # github_checks | local_command | both
+    github_checks:
+      required_contexts: []            # list of check names; empty = wait for all
+      timeout_ms: 300000
+    local_command:
+      run: "npm test && npm run lint"
+      timeout_ms: 300000
+    inject_into: reviewer              # reviewer | both
+    on_timeout: warn                   # warn | block
+  pr_lifecycle:
+    open_as_draft: false               # true = open phase PRs as draft, mark ready at freeze
+  tool_profiles:
+    enabled: false
+    default_profile: default
+    profiles:
+      default:
+        spec:   { author: all, reviewer: all }
+        plan:   { author: all, reviewer: all }
+        code:   { author: all, reviewer: all }
+        review: { coder_ack: all, reviewer: all }
+  metrics:
+    enabled: false
+    forced_rate_window: 20             # rolling window size for forced_rate computation
+    otel:
+      enabled: false
+      endpoint: null                   # OTLP endpoint; null = use OTEL_EXPORTER_OTLP_ENDPOINT
+      namespace: duet
 ```
 
 ### 12.1 Configuration validation
@@ -1262,7 +1422,8 @@ Event `kind` values: `task_queued`, `task_started`, `workspace_created`,
 `code_pr_conflict`, `state_divergence`, `agent_routing_selected`,
 `routing_override_applied`, `superpower_artifact_written`,
 `superpower_artifact_rejected`, `human_checkpoint_requested`,
-`human_checkpoint_resolved`.
+`human_checkpoint_resolved`, `verification_completed`, `verification_timeout`,
+`tool_denied`, `pr_draft_opened`, `pr_marked_ready`.
 
 ### 13.2 Per-turn transcripts
 
@@ -1325,6 +1486,49 @@ At task start, the orchestrator MUST emit `agent_routing_selected` with the
 profile name, phase matrix, conformance classification, human checkpoint
 settings, and SuperPower settings. Per-task operator changes after selection
 MUST emit `routing_override_applied`.
+
+### 13.5 Convergence metrics
+
+When `duet.metrics.enabled` is `true`, the orchestrator MUST compute and
+expose convergence-quality metrics per task and per phase. These metrics help
+operators assess pair-loop health and tune configuration (cycle caps, routing
+profiles, tool profiles) based on observed behavior rather than guesswork.
+
+**Per-phase metrics** (computed at phase freeze):
+
+| Metric | Definition |
+|--------|-----------|
+| `cycles_to_converge` | Number of Author→Reviewer round-trips before freeze |
+| `convergence_mode` | `natural` (both APPROVE) or `forced` (tie-breaker at cap) |
+| `confidence_delta` | `abs(author_final_confidence - reviewer_final_confidence)` |
+| `forced_rate` | Rolling ratio of `forced` freezes over last N tasks (N = implementation-defined, default 20) |
+| `mean_cycle_duration_ms` | Mean wall-clock time per cycle within the phase |
+| `verification_pass_rate` | Ratio of verification gates that passed on first check (§8.7); null when gate is disabled |
+
+**Per-task aggregate** (computed at task completion):
+
+| Metric | Definition |
+|--------|-----------|
+| `total_cycles` | Sum of `cycles_to_converge` across all phases |
+| `convergence_velocity` | `total_phases / total_cycles` (1.0 = single-cycle convergence everywhere) |
+| `escalation_count` | Number of phases that reached cap or triggered pathological disagreement |
+| `degraded_phases` | Count of phases where convergence was degraded (§10.2) |
+
+Metrics MUST be recorded in the `task_completed` event's `extra` field
+(§13.1) and MAY be exposed via the HTTP API (§13.3) at
+`GET /api/v1/tasks/<id>/metrics`.
+
+**OpenTelemetry integration** (optional). Implementations MAY export metrics
+as OTel gauges and counters under the `duet.` namespace. Recommended
+instruments:
+
+- `duet.phase.cycles` (histogram) — cycles to converge per phase
+- `duet.phase.forced` (counter) — forced convergence events
+- `duet.phase.confidence_delta` (histogram) — final confidence delta
+- `duet.task.convergence_velocity` (gauge) — per-task velocity
+- `duet.verification.pass_rate` (gauge) — rolling verification pass rate
+
+OTel export configuration is implementation-defined (§17).
 
 ---
 
@@ -1450,6 +1654,21 @@ Each port MUST document its choice for the following:
   session IDs are managed across phase boundaries, and what the fallback
   behavior is when `--print` fails or the CLI version does not support
   `--output-format stream-json`.
+- **Verification gate integration** (§8.7), if supported: which CI
+  providers or local commands are used, how `github_checks` contexts are
+  discovered, the default timeout, and how verification results are
+  formatted in the Reviewer prompt injection block.
+- **Tool profile identifiers** (§7.8), if supported: the set of recognized
+  tool identifiers (e.g. `file_write`, `git_push`, `shell`,
+  `shell_readonly`, `file_read`, `git_diff`, `web_search`), how they map
+  to actual runtime capabilities, and how denied tool calls are reported
+  to the agent.
+- **PR draft lifecycle** (§9.2.1), if supported: whether the initial draft
+  commit is empty or contains a scaffold, and how the draft-to-ready
+  transition interacts with branch protection rules.
+- **Metrics and OTel export** (§13.5), if supported: the OTel exporter
+  type (OTLP/gRPC, OTLP/HTTP, Prometheus), the `forced_rate_window`
+  default, and whether metrics are persisted beyond the event log.
 
 ---
 

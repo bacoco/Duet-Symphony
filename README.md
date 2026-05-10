@@ -44,7 +44,7 @@ Apache-2.0 license and NOTICE attribution.
 Duet-Symphony/
 ├── spec/                  # Language-agnostic specification (standalone)
 │   ├── README.md          #   Reading guide for implementers
-│   └── SPEC.md            #   Normative spec v0.3.0
+│   └── SPEC.md            #   Normative spec v0.4.0
 ├── AGENTS.md              # Project handoff notes and implementation guidance
 ├── REVIEW.md              # Design review and risk backlog
 ├── README.md              # This file
@@ -62,8 +62,9 @@ pair-runtime overlay) will live alongside `spec/` once development begins.
 `AGENTS.md` has the current implementation roadmap.
 
 The spec now also defines an initial operator routing menu, per-phase
-human-in-the-loop checkpoints, and optional SuperPower-style artifacts under
-`docs/superpowers/` for teams that want that SPEC/PLAN/REVIEW workflow.
+human-in-the-loop checkpoints, optional verification gates, draft PR lifecycle,
+convergence metrics, tool profiles, and optional SuperPower-style artifacts
+under `docs/superpowers/` for teams that want that SPEC/PLAN/REVIEW workflow.
 
 ## Quick links
 
