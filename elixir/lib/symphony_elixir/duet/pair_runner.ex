@@ -26,6 +26,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
     EventLog,
     HumanCheckpoint,
     Identity,
+    NotificationHook,
     PhasePrompt,
     PhaseTransition,
     PRConflict,
@@ -62,9 +63,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
       warn_if_identity_invalid()
       ctx = context(settings, workspace, issue, update_recipient, opts, worker_host, profile)
 
-      with :ok <- maybe_ensure_base_branch(ctx) do
-        run_next_phase(ctx)
-      end
+      result =
+        with :ok <- maybe_ensure_base_branch(ctx) do
+          run_next_phase(ctx)
+        end
+
+      maybe_dispatch_notification(result, issue, opts)
+      result
     else
       {:error, reason} -> {:error, {:state_event_failed, reason}}
     end
@@ -757,8 +762,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   defp maybe_setup_phase_workspace(%{side_effects: true, phase: "REVIEW"} = ctx) do
     case BranchHarness.phase_workspace(task_id(ctx.issue), "CODE", branch_harness_opts(ctx)) do
-      {:ok, path} -> {:ok, Map.put(ctx, :phase_workspace, path)}
-      {:error, _} -> {:ok, ctx}
+      {:ok, path} ->
+        {:ok, Map.put(ctx, :phase_workspace, path)}
+
+      {:error, reason} ->
+        Logger.warning("[Duet] REVIEW: CODE worktree unavailable (#{inspect(reason)}), using main workspace")
+
+        {:ok, ctx}
     end
   end
 
@@ -1179,4 +1189,37 @@ defmodule SymphonyElixir.Duet.PairRunner do
       other -> {:awaiting_operator, other}
     end
   end
+
+  @notification_mapping %{
+    human_checkpoint: :human_checkpoint_timeout,
+    code_pr_conflict: :code_pr_conflict,
+    verification_timeout: :verification_timeout,
+    superpower_artifact_invalid: :superpower_artifact_invalid,
+    phase_cap_escalation: :phase_cap_escalation,
+    state_divergence: :state_divergence
+  }
+
+  defp maybe_dispatch_notification({:error, reason}, issue, opts) do
+    case Map.get(@notification_mapping, reason) do
+      nil ->
+        :ok
+
+      hook_event ->
+        payload = %{task_id: task_id(issue), reason: reason}
+        hook_opts = Keyword.take(opts, [:notification_hook_runner])
+
+        hook_opts =
+          case Keyword.get(hook_opts, :notification_hook_runner) do
+            runner when is_atom(runner) and not is_nil(runner) ->
+              [runner: runner]
+
+            _ ->
+              []
+          end
+
+        NotificationHook.dispatch(hook_event, payload, hook_opts)
+    end
+  end
+
+  defp maybe_dispatch_notification(_result, _issue, _opts), do: :ok
 end

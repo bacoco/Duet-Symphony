@@ -8,7 +8,10 @@ defmodule SymphonyElixir.Orchestrator do
   import Bitwise, only: [<<<: 2]
 
   alias SymphonyElixir.{Config, RunnerSelector, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.Duet.AwaitingOperator
   alias SymphonyElixir.Linear.Issue
+
+  @awaiting_operator_reasons AwaitingOperator.reasons()
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -747,6 +750,11 @@ defmodule SymphonyElixir.Orchestrator do
   defp run_issue_with_runner(runner, issue, recipient, opts) do
     case runner.run(issue, recipient, opts) do
       :ok ->
+        :ok
+
+      {:error, reason} when reason in @awaiting_operator_reasons ->
+        Logger.info("Runner paused for #{issue_context(issue)}: awaiting operator (#{reason})")
+
         :ok
 
       {:error, reason} ->

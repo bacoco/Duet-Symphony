@@ -421,6 +421,154 @@ defmodule SymphonyElixir.DuetE2ETest do
     end
   end
 
+  # ── Test 5 ──────────────────────────────────────────────────────
+
+  @tag :e2e
+  test "PairRunner pauses with pause_on_freeze after SPEC convergence" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-e2e-duet-pause-freeze-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root,
+        poll_interval_ms: 60_000,
+        duet_yaml: """
+        duet:
+          enabled: true
+          pause_on_freeze: true
+        """
+      )
+
+      issue = %Issue{
+        id: "issue-e2e-pause-freeze",
+        identifier: "E2E-PAUSE-FREEZE",
+        title: "Pause on freeze gate",
+        description: "Verify pause_on_freeze halts after SPEC",
+        state: "In Progress",
+        url: "https://example.org/issues/E2E-PAUSE-FREEZE"
+      }
+
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+      EventLog.set_root(Path.join(test_root, ".duet/logs"))
+
+      response = approve_response("E2E SPEC pause")
+
+      assert {:error, :pause_on_freeze} =
+               PairRunner.run(issue, self(),
+                 turn_driver: SymphonyElixir.Duet.TurnDrivers.Mock,
+                 turn_driver_opts: [response: response],
+                 tree_hash: "tree-e2e-pause"
+               )
+
+      assert {:ok, events} = EventLog.read(issue)
+
+      frozen = Enum.find(events, &(&1["kind"] == "phase_frozen"))
+      assert frozen["phase"] == "SPEC"
+      assert frozen["awaiting_operator_reason"] == "pause_on_freeze"
+
+      # Retry should also return pause_on_freeze (gate still pending).
+      assert {:error, :pause_on_freeze} =
+               PairRunner.run(issue, self(),
+                 turn_driver: SymphonyElixir.Duet.TurnDrivers.Mock,
+                 turn_driver_opts: [response: response],
+                 tree_hash: "tree-e2e-pause"
+               )
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  # ── Test 6 ──────────────────────────────────────────────────────
+
+  @tag :e2e
+  test "phase_cap_escalation gate triggers when CODE exceeds max cycles" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-e2e-duet-cap-escalation-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root,
+        poll_interval_ms: 60_000,
+        duet_yaml: """
+        duet:
+          enabled: true
+          max_cycles_per_phase: 1
+          code_phase_cap_policy: escalate
+        """
+      )
+
+      issue = %Issue{
+        id: "issue-e2e-cap-escalation",
+        identifier: "E2E-CAP",
+        title: "Phase cap escalation",
+        description: "CODE cap triggers escalation gate",
+        state: "In Progress",
+        url: "https://example.org/issues/E2E-CAP"
+      }
+
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+      EventLog.set_root(Path.join(test_root, ".duet/logs"))
+
+      reject_response = """
+      Rejected
+
+      ---DUET-TRAILER---
+      verdict: REQUEST_CHANGES
+      confidence: 0.6
+      summary: needs work
+      unresolved: [fix the thing]
+      ---END-DUET-TRAILER---
+      """
+
+      {:ok, agent} =
+        Agent.start_link(fn ->
+          [
+            # SPEC: approve through
+            approve_response("SPEC author"),
+            approve_response("SPEC reviewer"),
+            # PLAN: approve through
+            approve_response("PLAN author"),
+            approve_response("PLAN reviewer"),
+            # CODE cycle 1: reviewer rejects → cap hit → escalate
+            approve_response("CODE author"),
+            reject_response
+          ]
+        end)
+
+      on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+      opts = [
+        turn_driver: SequenceDriver,
+        turn_driver_opts: [sequence_agent: agent, test_pid: self()],
+        tree_hash_provider: fn _ws, phase, _cycle, _actor -> "tree-#{phase}" end
+      ]
+
+      # SPEC
+      assert :ok = PairRunner.run(issue, self(), opts)
+      # PLAN
+      assert :ok = PairRunner.run(issue, self(), opts)
+      # CODE: hits cap → escalation
+      assert {:error, :phase_cap_escalation} = PairRunner.run(issue, self(), opts)
+
+      assert {:ok, events} = EventLog.read(issue)
+      assert Enum.any?(events, &(&1["kind"] == "phase_cap_escalation"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────
 
   defp approve_response(label) do
