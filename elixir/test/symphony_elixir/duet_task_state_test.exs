@@ -87,6 +87,27 @@ defmodule SymphonyElixir.DuetTaskStateTest do
     assert state.routing_divergence["current"]["profile_name"] == "codex_only_dev"
   end
 
+  test "recovers awaiting_operator gates without discarding phase context" do
+    task_id = "TASK-AWAITING-OPERATOR"
+
+    assert {:ok, _event} = EventLog.append(task_id, "task_started", %{identifier: "MT-901"})
+    assert {:ok, _event} = EventLog.append(task_id, "phase_started", %{phase: "CODE", cycle: 5})
+
+    assert {:ok, _event} =
+             EventLog.append(task_id, "phase_cap_escalation", %{
+               phase: "CODE",
+               cycle: 5,
+               reason: "phase_cap_escalation"
+             })
+
+    assert {:ok, state} = TaskState.recover(task_id)
+    assert state.status == "awaiting_operator"
+    assert state.awaiting_operator_reason == "phase_cap_escalation"
+    assert state.current_phase == "CODE"
+    assert state.phases["CODE"].status == "awaiting_operator"
+    assert state.phases["CODE"].cycle == 5
+  end
+
   defp restore_app_env(key, nil), do: Application.delete_env(:symphony_elixir, key)
   defp restore_app_env(key, value), do: Application.put_env(:symphony_elixir, key, value)
 end

@@ -37,6 +37,7 @@ defmodule SymphonyElixir.Duet.TaskState do
             routing: map() | nil,
             routing_status: routing_status(),
             routing_divergence: map() | nil,
+            awaiting_operator_reason: String.t() | nil,
             phases: %{String.t() => Phase.t()},
             events_count: non_neg_integer(),
             last_event: map() | nil
@@ -47,6 +48,7 @@ defmodule SymphonyElixir.Duet.TaskState do
       :current_phase,
       :routing,
       :routing_divergence,
+      :awaiting_operator_reason,
       :last_event,
       status: "unknown",
       routing_status: "missing",
@@ -100,22 +102,77 @@ defmodule SymphonyElixir.Duet.TaskState do
     |> put_phase(event, "running")
   end
 
+  defp apply_event(%{"kind" => "phase_frozen", "awaiting_operator_reason" => reason} = event, state)
+       when is_binary(reason) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "frozen")
+    |> put_awaiting_operator(reason)
+  end
+
   defp apply_event(%{"kind" => "phase_frozen"} = event, state) do
     state
     |> mark_seen(event)
     |> put_phase(event, "frozen")
   end
 
+  defp apply_event(%{"kind" => "human_checkpoint_requested"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "awaiting_operator")
+    |> put_awaiting_operator("human_checkpoint")
+  end
+
+  defp apply_event(%{"kind" => "phase_cap_escalation"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "awaiting_operator")
+    |> put_awaiting_operator("phase_cap_escalation")
+  end
+
+  defp apply_event(%{"kind" => "code_pr_conflict"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "awaiting_operator")
+    |> put_awaiting_operator("code_pr_conflict")
+  end
+
+  defp apply_event(%{"kind" => "superpower_artifact_rejected"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "awaiting_operator")
+    |> put_awaiting_operator("superpower_artifact_invalid")
+  end
+
+  defp apply_event(
+         %{"kind" => "verification_completed", "status" => "timeout", "reason" => "verification_timeout"} = event,
+         state
+       ) do
+    state
+    |> mark_seen(event)
+    |> put_phase(event, "awaiting_operator")
+    |> put_awaiting_operator("verification_timeout")
+  end
+
   defp apply_event(%{"kind" => "task_completed"} = event, state) do
     state
     |> mark_seen(event)
     |> Map.put(:status, "completed")
+    |> Map.put(:awaiting_operator_reason, nil)
   end
 
   defp apply_event(%{"kind" => "task_failed"} = event, state) do
     state
     |> mark_seen(event)
     |> Map.put(:status, "failed")
+    |> Map.put(:awaiting_operator_reason, nil)
+  end
+
+  defp apply_event(%{"kind" => "human_checkpoint_resolved"} = event, state) do
+    state
+    |> mark_seen(event)
+    |> Map.put(:status, "running")
+    |> Map.put(:awaiting_operator_reason, nil)
   end
 
   defp apply_event(event, state) when is_map(event), do: mark_seen(state, event)
@@ -147,6 +204,10 @@ defmodule SymphonyElixir.Duet.TaskState do
       _missing_phase ->
         state
     end
+  end
+
+  defp put_awaiting_operator(%State{} = state, reason) do
+    %State{state | status: "awaiting_operator", awaiting_operator_reason: reason}
   end
 
   defp merge_if_present(struct, _key, nil), do: struct

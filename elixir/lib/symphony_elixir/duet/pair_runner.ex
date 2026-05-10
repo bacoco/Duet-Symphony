@@ -2,35 +2,43 @@ defmodule SymphonyElixir.Duet.PairRunner do
   @moduledoc """
   Claude + Codex pair runner for Duet mode.
 
-  The current implementation wires the SPEC phase loop end to end:
-  Author turn, Reviewer turn, trailer recording, transcript persistence,
-  convergence evaluation, cycle continuation, and SPEC freeze. Later
-  slices will reuse this phase driver for PLAN/CODE/REVIEW and attach
-  the GitHub PR side effects returned by the pure helper modules.
+  This runner wires the sequential Duet phase pipeline across SPEC, PLAN,
+  CODE, and REVIEW. Each dispatch advances at most one phase to a frozen
+  state; Symphony's existing active-state continuation retry then dispatches
+  the task again and the runner resumes from the append-only event log.
 
-  A frozen SPEC currently stops with `{:error, :plan_not_implemented}` on
-  the next continuation dispatch because PLAN is not wired yet. This is
-  deliberate for the first wave-8 slice: it proves real pair convergence
-  without pretending the full task pipeline exists.
+  The implementation intentionally keeps GitHub branch / PR side effects
+  outside this module for now. It records the normative Duet machine state
+  (`phase_started`, `turn_request`, `turn_response`, `phase_frozen`,
+  `task_completed`, and gate events), while future slices attach real PR
+  operations at the freeze-action boundaries.
   """
 
   alias SymphonyElixir.Duet.{
+    AwaitingOperator,
     Convergence,
     ConvergenceOrchestrator,
     EventLog,
+    HumanCheckpoint,
     PhasePrompt,
+    PhaseTransition,
+    PRConflict,
     Routing,
     RoutingSelection,
+    SuperPower,
+    ToolProfile,
     Transcripts,
     Turn,
     TurnDrivers.ClaudeCode,
-    TurnDrivers.CodexAppServer
+    TurnDrivers.CodexAppServer,
+    VerificationGate
   }
 
   alias SymphonyElixir.RunnerRuntime
 
-  @phase "SPEC"
-  @phase_key "spec"
+  @phases ~w(SPEC PLAN CODE REVIEW)
+  @phase_keys %{"SPEC" => "spec", "PLAN" => "plan", "CODE" => "code", "REVIEW" => "review"}
+  @awaiting_reasons AwaitingOperator.reasons()
 
   @spec run(map(), pid() | nil, keyword()) :: :ok | {:error, term()}
   def run(issue, update_recipient \\ nil, opts \\ []) do
@@ -38,36 +46,57 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp run_pair_loop(workspace, issue, update_recipient, opts, worker_host) do
-    with {:ok, profile} <- RoutingSelection.resolve(SymphonyElixir.Config.settings!().duet),
+    settings = SymphonyElixir.Config.settings!()
+
+    with {:ok, profile} <- RoutingSelection.resolve(settings.duet),
          :ok <- ensure_initial_state_events(issue, profile) do
-      if phase_frozen?(issue, @phase) do
-        {:error, :plan_not_implemented}
-      else
-        run_spec_phase(context(workspace, issue, update_recipient, opts, worker_host, profile))
-      end
+      ctx = context(settings, workspace, issue, update_recipient, opts, worker_host, profile)
+      run_next_phase(ctx)
     else
       {:error, reason} -> {:error, {:state_event_failed, reason}}
     end
   end
 
-  defp context(workspace, issue, update_recipient, opts, worker_host, profile) do
+  defp context(settings, workspace, issue, update_recipient, opts, worker_host, profile) do
     %{
+      settings: settings,
       workspace: workspace,
       issue: issue,
       update_recipient: update_recipient,
       opts: opts,
       worker_host: worker_host,
       profile: profile,
-      max_cycles: SymphonyElixir.Config.settings!().duet.max_cycles_per_phase,
-      code_phase_cap_policy: SymphonyElixir.Config.settings!().duet.code_phase_cap_policy
+      max_cycles: settings.duet.max_cycles_per_phase,
+      code_phase_cap_policy: String.to_atom(settings.duet.code_phase_cap_policy)
     }
   end
 
-  defp run_spec_phase(ctx) do
-    case spec_phase_actors(ctx.profile) do
-      {:ok, author, reviewer} ->
+  defp run_next_phase(ctx) do
+    case current_phase(ctx.issue) do
+      {:ok, :completed} ->
+        :ok
+
+      {:ok, phase} ->
         ctx
-        |> Map.merge(%{author: author, reviewer: reviewer})
+        |> Map.put(:phase, phase)
+        |> Map.put(:phase_key, Map.fetch!(@phase_keys, phase))
+        |> run_phase()
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp run_phase(ctx) do
+    case phase_actors(ctx.profile, ctx.phase) do
+      {:ok, author, reviewer, author_role, reviewer_role} ->
+        ctx
+        |> Map.merge(%{
+          author: author,
+          reviewer: reviewer,
+          author_role: author_role,
+          reviewer_role: reviewer_role
+        })
         |> run_cycle(1, [], %{author_last: nil, reviewer_last_authored: nil}, nil)
 
       {:error, reason} ->
@@ -78,9 +107,9 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp run_cycle(ctx, cycle, unresolved_history, revision_history, reviewer_feedback) do
-    with :ok <- ensure_phase_started(ctx.issue, cycle),
-         {:ok, author_turn, author_response} <- ensure_turn(ctx, cycle, :author, ctx.author, reviewer_feedback),
-         {:ok, reviewer_turn, reviewer_response} <- ensure_turn(ctx, cycle, :reviewer, ctx.reviewer, author_response) do
+    with :ok <- ensure_phase_started(ctx.issue, ctx.phase, cycle),
+         {:ok, author_turn, author_response} <- ensure_turn(ctx, cycle, ctx.author_role, ctx.author, reviewer_feedback),
+         {:ok, reviewer_turn, reviewer_response} <- ensure_reviewer_turn(ctx, cycle, author_response) do
       decide_after_cycle(
         ctx,
         cycle,
@@ -90,6 +119,18 @@ defmodule SymphonyElixir.Duet.PairRunner do
         unresolved_history,
         revision_history
       )
+    end
+  end
+
+  defp ensure_reviewer_turn(ctx, cycle, author_response) do
+    case existing_turn(ctx.issue, ctx.phase, cycle, ctx.reviewer) do
+      {:ok, %Turn{} = turn} ->
+        {:ok, turn, transcript_response(ctx.issue, ctx.phase, cycle, ctx.reviewer, turn.summary)}
+
+      :missing ->
+        with {:ok, reviewer_context} <- maybe_run_verification_gate(ctx, cycle, author_response) do
+          run_turn(ctx, cycle, ctx.reviewer_role, ctx.reviewer, reviewer_context)
+        end
     end
   end
 
@@ -103,7 +144,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
     decision =
       ConvergenceOrchestrator.decide(
-        phase: @phase,
+        phase: ctx.phase,
         cycle: cycle,
         max_cycles: ctx.max_cycles,
         code_phase_cap_policy: ctx.code_phase_cap_policy,
@@ -118,7 +159,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp apply_decision(ctx, cycle, {:freeze, mode, tree_hash}, _unresolved_history, _revision_history, _feedback) do
-    append_phase_frozen(ctx.issue, cycle, freeze_mode(mode), tree_hash)
+    with :ok <- maybe_request_human_checkpoint(ctx, cycle, tree_hash),
+         :ok <- maybe_check_review_code_pr_mergeability(ctx, cycle),
+         :ok <- append_phase_frozen(ctx, cycle, freeze_mode(mode), tree_hash),
+         :ok <- maybe_write_superpower_artifact(ctx, cycle),
+         :ok <- maybe_append_task_completed(ctx, cycle) do
+      maybe_pause_on_freeze(ctx, cycle)
+    end
   end
 
   defp apply_decision(ctx, cycle, {:continue, _reason}, unresolved_history, revision_history, feedback) do
@@ -128,7 +175,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp apply_decision(ctx, _cycle, {:fail, :pathological_disagreement, unresolved}, _history, _revisions, _feedback) do
     with {:ok, _event} <-
            EventLog.append(ctx.issue, "pathological_disagreement", %{
-             phase: @phase,
+             phase: ctx.phase,
              unresolved: unresolved
            }),
          :ok <- ensure_failure_event(ctx.issue, "pathological_disagreement") do
@@ -144,19 +191,19 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   defp apply_decision(ctx, cycle, {:awaiting_operator, reason}, _history, _revisions, _feedback) do
     with {:ok, _event} <-
-           EventLog.append(ctx.issue, "phase_cap_escalation", %{
-             phase: @phase,
+           append_once_event(ctx.issue, "phase_cap_escalation", %{
+             phase: ctx.phase,
              cycle: cycle,
-             reason: Atom.to_string(reason)
+             reason: awaiting_reason(reason)
            }) do
       {:error, reason}
     end
   end
 
   defp ensure_turn(ctx, cycle, role, actor, context_text) do
-    case existing_turn(ctx.issue, cycle, actor) do
+    case existing_turn(ctx.issue, ctx.phase, cycle, actor) do
       {:ok, %Turn{} = turn} ->
-        {:ok, turn, transcript_response(ctx.issue, cycle, actor, turn.summary)}
+        {:ok, turn, transcript_response(ctx.issue, ctx.phase, cycle, actor, turn.summary)}
 
       :missing ->
         run_turn(ctx, cycle, role, actor, context_text)
@@ -168,34 +215,72 @@ defmodule SymphonyElixir.Duet.PairRunner do
     tree_hash = tree_hash_for(ctx, cycle, actor)
 
     with {:ok, driver} <- driver_for_actor(ctx.opts, actor),
-         :ok <- ensure_turn_request(ctx.issue, cycle, actor, tree_hash),
+         :ok <- ensure_turn_request(ctx.issue, ctx.phase, cycle, actor, tree_hash),
          {:ok, response_text} <- driver.drive_turn(prompt, driver_opts(ctx, actor)),
-         {:ok, _path} <- Transcripts.write(ctx.issue, @phase, cycle, actor, prompt, response_text),
-         {:ok, turn, _issues} <- Turn.record_response(ctx.issue, @phase, cycle, actor, response_text, tree_hash: tree_hash) do
+         {:ok, _path} <- Transcripts.write(ctx.issue, ctx.phase, cycle, actor, prompt, response_text),
+         {:ok, turn, _issues} <-
+           Turn.record_response(ctx.issue, ctx.phase, cycle, actor, response_text, tree_hash: tree_hash) do
       {:ok, turn, response_text}
     else
-      {:error, reason} -> {:error, {:turn_failed, actor, cycle, reason}}
+      {:error, reason} -> {:error, {:turn_failed, ctx.phase, actor, cycle, reason}}
     end
   end
 
-  defp build_prompt(ctx, cycle, :author, actor, reviewer_feedback) do
-    prompt_context(ctx, cycle, :author, actor, ctx.reviewer)
-    |> Map.put(:reviewer_feedback, reviewer_feedback)
+  defp build_prompt(ctx, cycle, role, actor, context_text) when role in [:author, :coder_ack] do
+    prompt_context(ctx, cycle, role, actor, ctx.reviewer)
+    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx.issue))
+    |> Map.put(:reviewer_feedback, context_text)
     |> PhasePrompt.build()
+    |> append_tool_constraints(ctx, role, actor)
   end
 
-  defp build_prompt(ctx, cycle, :reviewer, actor, current_artifact) do
-    prompt_context(ctx, cycle, :reviewer, actor, ctx.author)
-    |> Map.put(:current_artifact, current_artifact)
+  defp build_prompt(ctx, cycle, role, actor, context_text) do
+    prompt_context(ctx, cycle, role, actor, ctx.author)
+    |> Map.put(:prior_phase_summaries, prior_phase_summaries(ctx.issue))
+    |> Map.put(:current_artifact, context_text)
     |> PhasePrompt.build()
+    |> append_tool_constraints(ctx, role, actor)
   end
+
+  defp append_tool_constraints(prompt, ctx, role, actor) do
+    case tool_constraints(ctx, role, actor) do
+      {:ok, :all} ->
+        prompt
+
+      {:ok, tools} when is_list(tools) ->
+        prompt <>
+          "\n\n## Tool constraints\nAllowed tools for this turn: " <>
+          Enum.join(tools, ", ") <> ". Do not request or use tools outside this list."
+
+      {:error, reason} ->
+        prompt <>
+          "\n\n## Tool constraints\nTool-profile resolution failed: " <>
+          inspect(reason) <> ". Proceed without external tool use unless the operator resolves the configuration."
+    end
+  end
+
+  defp tool_constraints(ctx, role, actor) do
+    config = ctx.settings.duet.tool_profiles
+
+    if is_map(config) do
+      profile_name = ToolProfile.default_profile_name(config)
+      ToolProfile.resolve(config, profile_name, ctx.phase_key, tool_role(role), actor)
+    else
+      {:ok, :all}
+    end
+  end
+
+  defp tool_role(:coder_ack), do: "coder_ack"
+  defp tool_role(:review_reviewer), do: "reviewer"
+  defp tool_role(:author), do: "author"
+  defp tool_role(:reviewer), do: "reviewer"
 
   defp prompt_context(ctx, cycle, role, actor, counterpart) do
     %PhasePrompt{
       task_id: task_id(ctx.issue),
       issue_title: Map.get(ctx.issue, :title) || "",
       issue_description: Map.get(ctx.issue, :description) || "",
-      phase: @phase,
+      phase: ctx.phase,
       cycle: cycle,
       max_cycles_per_phase: ctx.max_cycles,
       role: role,
@@ -232,24 +317,48 @@ defmodule SymphonyElixir.Duet.PairRunner do
     |> String.trim_trailing()
   end
 
-  defp spec_phase_actors(profile) do
-    phase = Map.get(profile.phases, @phase_key, %Routing.Phase{})
-    author = phase.author
-    reviewers = phase.reviewers
+  defp phase_actors(profile, phase) when phase in ["SPEC", "PLAN", "CODE"] do
+    routing = Map.get(profile.phases, Map.fetch!(@phase_keys, phase), %Routing.Phase{})
+    author = routing.author
+    reviewer = List.first(routing.reviewers)
 
     cond do
-      not supported_actor?(author) ->
-        {:error, :unsupported_author}
-
-      reviewers == [] ->
-        {:error, :reviewer_not_configured}
-
-      not supported_actor?(List.first(reviewers)) ->
-        {:error, :unsupported_reviewer}
-
-      true ->
-        {:ok, author, List.first(reviewers)}
+      not supported_actor?(author) -> {:error, :unsupported_author}
+      is_nil(reviewer) -> {:error, :reviewer_not_configured}
+      not supported_actor?(reviewer) -> {:error, :unsupported_reviewer}
+      author == reviewer -> {:error, :self_review_not_supported}
+      true -> {:ok, author, reviewer, :author, :reviewer}
     end
+  end
+
+  defp phase_actors(profile, "REVIEW") do
+    review = Map.get(profile.phases, "review", %Routing.Phase{})
+
+    with {:ok, coder_ack} <- resolve_review_actor(profile, review.coder_ack),
+         {:ok, reviewer} <- resolve_review_actor(profile, review.reviewer) do
+      if coder_ack == reviewer do
+        {:error, :self_review_not_supported}
+      else
+        {:ok, coder_ack, reviewer, :coder_ack, :review_reviewer}
+      end
+    end
+  end
+
+  defp resolve_review_actor(profile, "code_author") do
+    code = Map.get(profile.phases, "code", %Routing.Phase{})
+
+    if supported_actor?(code.author), do: {:ok, code.author}, else: {:error, :unsupported_author}
+  end
+
+  defp resolve_review_actor(profile, "non_coder") do
+    code = Map.get(profile.phases, "code", %Routing.Phase{})
+    reviewer = Enum.find(code.reviewers, &supported_actor?/1)
+
+    if is_binary(reviewer), do: {:ok, reviewer}, else: {:error, :reviewer_not_configured}
+  end
+
+  defp resolve_review_actor(_profile, actor) do
+    if supported_actor?(actor), do: {:ok, actor}, else: {:error, :unsupported_reviewer}
   end
 
   defp supported_actor?(actor), do: actor in ["claude", "codex"]
@@ -306,21 +415,24 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp send_codex_update(_recipient, _issue, _message), do: :ok
 
   defp ensure_initial_state_events(issue, profile) do
-    with :ok <- append_once(issue, "task_started", task_attrs(issue)),
-         :ok <- ensure_routing_selected(issue, Routing.to_event_attrs(profile)) do
-      ensure_phase_started(issue, 1)
+    case append_once(issue, "task_started", task_attrs(issue)) do
+      :ok -> ensure_routing_selected(issue, Routing.to_event_attrs(profile))
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp ensure_phase_started(issue, cycle) do
-    append_once(issue, "phase_started", %{phase: @phase, cycle: cycle}, %{"phase" => @phase, "cycle" => cycle})
+  defp ensure_phase_started(issue, phase, cycle) do
+    append_once(issue, "phase_started", %{phase: phase, cycle: cycle}, %{
+      "phase" => phase,
+      "cycle" => cycle
+    })
   end
 
-  defp ensure_turn_request(issue, cycle, actor, tree_hash) do
-    if event_recorded?(issue, "turn_request", %{"phase" => @phase, "cycle" => cycle, "actor" => actor}) do
+  defp ensure_turn_request(issue, phase, cycle, actor, tree_hash) do
+    if event_recorded?(issue, "turn_request", %{"phase" => phase, "cycle" => cycle, "actor" => actor}) do
       :ok
     else
-      Turn.record_request(issue, @phase, cycle, actor, tree_hash: tree_hash)
+      Turn.record_request(issue, phase, cycle, actor, tree_hash: tree_hash)
     end
   end
 
@@ -328,20 +440,303 @@ defmodule SymphonyElixir.Duet.PairRunner do
     append_once(issue, "task_failed", %{reason: reason}, %{"reason" => reason})
   end
 
-  defp append_phase_frozen(issue, cycle, mode, tree_hash) do
+  defp append_phase_frozen(ctx, cycle, mode, tree_hash) do
     append_once(
-      issue,
+      ctx.issue,
       "phase_frozen",
-      %{phase: @phase, cycle: cycle, mode: mode, tree_hash: tree_hash, next_phase: "PLAN"},
-      %{"phase" => @phase}
+      phase_frozen_attrs(ctx, cycle, mode, tree_hash),
+      %{"phase" => ctx.phase}
     )
   end
 
-  defp existing_turn(issue, cycle, actor) do
+  defp phase_frozen_attrs(ctx, cycle, mode, tree_hash) do
+    attrs =
+      %{
+        phase: ctx.phase,
+        cycle: cycle,
+        mode: mode,
+        tree_hash: tree_hash,
+        next_phase: PhaseTransition.next_phase(ctx.phase),
+        freeze_actions: Enum.map(PhaseTransition.freeze_actions(ctx.phase), &Atom.to_string/1)
+      }
+
+    if pause_on_freeze?(ctx) do
+      Map.put(attrs, :awaiting_operator_reason, "pause_on_freeze")
+    else
+      attrs
+    end
+  end
+
+  defp maybe_append_task_completed(ctx, cycle) do
+    if ctx.phase == "REVIEW" do
+      append_once(ctx.issue, "task_completed", %{phase: "REVIEW", cycle: cycle}, %{})
+    else
+      :ok
+    end
+  end
+
+  defp maybe_request_human_checkpoint(ctx, cycle, tree_hash) do
+    if HumanCheckpoint.blocking?(ctx.settings.duet, ctx.phase) do
+      append_once(ctx.issue, "human_checkpoint_requested", human_checkpoint_attrs(ctx, cycle, tree_hash), %{
+        "phase" => ctx.phase
+      })
+      |> case do
+        :ok -> {:error, :human_checkpoint}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_check_review_code_pr_mergeability(%{phase: "REVIEW"} = ctx, cycle) do
+    case code_pr_mergeability(ctx) do
+      :not_configured ->
+        :ok
+
+      :mergeable ->
+        :ok
+
+      {:conflict, %{paths: paths, base_head: base_head, pr_permalink: pr_permalink}} ->
+        attrs =
+          pr_permalink
+          |> PRConflict.event_attrs(paths, base_head)
+          |> Map.merge(%{phase: "REVIEW", cycle: cycle, reason: "code_pr_conflict"})
+
+        with {:ok, _event} <-
+               append_once_event(ctx.issue, "code_pr_conflict", attrs) do
+          {:error, :code_pr_conflict}
+        end
+
+      {:retry_later, state} ->
+        {:error, {:code_pr_mergeability_pending, state}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp maybe_check_review_code_pr_mergeability(_ctx, _cycle), do: :ok
+
+  defp code_pr_mergeability(ctx) do
+    case Keyword.get(ctx.opts, :code_pr_mergeability_provider) do
+      provider when is_function(provider, 1) ->
+        normalize_code_pr_mergeability(provider.(ctx))
+
+      provider when is_function(provider, 2) ->
+        normalize_code_pr_mergeability(provider.(ctx.phase, ctx))
+
+      _other ->
+        :not_configured
+    end
+  end
+
+  defp normalize_code_pr_mergeability({:ok, result}), do: normalize_code_pr_mergeability(result)
+  defp normalize_code_pr_mergeability(:mergeable), do: :mergeable
+  defp normalize_code_pr_mergeability({:retry_later, state}), do: {:retry_later, state}
+
+  defp normalize_code_pr_mergeability({:conflict, attrs}) when is_map(attrs) do
+    {:conflict,
+     %{
+       paths:
+         Map.get(attrs, :paths) || Map.get(attrs, "paths") || Map.get(attrs, :conflicting_paths) ||
+           Map.get(attrs, "conflicting_paths") || [],
+       base_head: Map.get(attrs, :base_head) || Map.get(attrs, "base_head"),
+       pr_permalink: Map.get(attrs, :pr_permalink) || Map.get(attrs, "pr_permalink")
+     }}
+  end
+
+  defp normalize_code_pr_mergeability(input) when is_map(input) do
+    case PRConflict.evaluate(input) do
+      :mergeable ->
+        :mergeable
+
+      {:retry_later, state} ->
+        {:retry_later, state}
+
+      {:conflict, %{paths: paths, base_head: base_head}} ->
+        {:conflict,
+         %{
+           paths: paths,
+           base_head: base_head,
+           pr_permalink: Map.get(input, :pr_permalink) || Map.get(input, "pr_permalink")
+         }}
+    end
+  end
+
+  defp normalize_code_pr_mergeability({:error, reason}), do: {:error, reason}
+  defp normalize_code_pr_mergeability(other), do: {:error, {:invalid_code_pr_mergeability, other}}
+
+  defp maybe_run_verification_gate(ctx, cycle, author_response) do
+    verification_gate = ctx.settings.duet.verification_gate
+
+    if verification_gate_enabled_for_phase?(verification_gate, ctx.phase) do
+      run_verification_gate(ctx, cycle, author_response, verification_gate)
+    else
+      {:ok, author_response}
+    end
+  end
+
+  defp run_verification_gate(ctx, cycle, author_response, verification_gate) do
+    checks = verification_checks(ctx, cycle)
+    status = checks |> Enum.map(&Map.get(&1, :status)) |> VerificationGate.aggregate_status()
+    block = VerificationGate.build_block(checks, status)
+
+    with {:ok, _event} <- append_verification_completed(ctx.issue, ctx.phase, cycle, status, checks) do
+      verification_gate_result(status, verification_gate, author_response, block)
+    end
+  end
+
+  defp verification_gate_result(:timeout, verification_gate, author_response, block) do
+    if verification_on_timeout(verification_gate) == "block" do
+      {:error, :verification_timeout}
+    else
+      {:ok, author_response <> "\n\n" <> block}
+    end
+  end
+
+  defp verification_gate_result(_status, _verification_gate, author_response, block) do
+    {:ok, author_response <> "\n\n" <> block}
+  end
+
+  defp verification_gate_enabled_for_phase?(verification_gate, phase) when is_map(verification_gate) do
+    phase_key = String.downcase(phase)
+
+    Map.get(verification_gate, "enabled", false) == true and
+      phase_key in Map.get(verification_gate, "phases", [])
+  end
+
+  defp verification_gate_enabled_for_phase?(_verification_gate, _phase), do: false
+
+  defp verification_checks(ctx, cycle) do
+    case Keyword.get(ctx.opts, :verification_checks_provider) do
+      provider when is_function(provider, 3) ->
+        provider.(ctx.phase, cycle, ctx)
+
+      provider when is_function(provider, 2) ->
+        provider.(ctx.phase, cycle)
+
+      _other ->
+        Keyword.get(ctx.opts, :verification_checks, [
+          %{name: "duet/verification_not_configured", status: :partial, summary: "No verification runner configured"}
+        ])
+    end
+    |> normalize_verification_checks()
+  end
+
+  defp normalize_verification_checks({:ok, checks}), do: normalize_verification_checks(checks)
+  defp normalize_verification_checks(:timeout), do: [%{name: "verification_timeout", status: :timeout}]
+
+  defp normalize_verification_checks(checks) when is_list(checks) do
+    Enum.map(checks, fn check ->
+      %{
+        name: Map.get(check, :name) || Map.get(check, "name") || "verification",
+        status: normalize_verification_status(Map.get(check, :status) || Map.get(check, "status")),
+        summary: Map.get(check, :summary) || Map.get(check, "summary")
+      }
+    end)
+  end
+
+  defp normalize_verification_checks(_other), do: [%{name: "verification", status: :partial}]
+
+  defp normalize_verification_status(status) when status in [:pass, :fail, :partial, :timeout], do: status
+  defp normalize_verification_status("pass"), do: :pass
+  defp normalize_verification_status("fail"), do: :fail
+  defp normalize_verification_status("partial"), do: :partial
+  defp normalize_verification_status("timeout"), do: :timeout
+  defp normalize_verification_status(_other), do: :partial
+
+  defp append_verification_completed(issue, phase, cycle, status, checks) do
+    attrs = %{
+      phase: phase,
+      cycle: cycle,
+      status: Atom.to_string(status),
+      checks: stringify_keys(checks)
+    }
+
+    attrs =
+      if status == :timeout do
+        Map.put(attrs, :reason, "verification_timeout")
+      else
+        attrs
+      end
+
+    append_once_event(issue, "verification_completed", attrs)
+  end
+
+  defp verification_on_timeout(verification_gate) do
+    Map.get(verification_gate, "on_timeout", "warn")
+  end
+
+  defp human_checkpoint_attrs(ctx, cycle, tree_hash) do
+    %{
+      phase: ctx.phase,
+      cycle: cycle,
+      tree_hash: tree_hash,
+      reason: "human_checkpoint"
+    }
+  end
+
+  defp maybe_pause_on_freeze(ctx) do
+    if pause_on_freeze?(ctx) do
+      {:error, :pause_on_freeze}
+    else
+      :ok
+    end
+  end
+
+  defp maybe_pause_on_freeze(ctx, _cycle), do: maybe_pause_on_freeze(ctx)
+
+  defp pause_on_freeze?(%{phase: "REVIEW"}), do: false
+  defp pause_on_freeze?(ctx), do: ctx.settings.duet.pause_on_freeze
+
+  defp maybe_write_superpower_artifact(ctx, cycle) do
+    superpower = ctx.settings.duet.superpower
+
+    if SuperPower.phase_enabled?(superpower, ctx.phase) do
+      with {:ok, path} <- SuperPower.artifact_path(superpower, ctx.phase, task_id(ctx.issue)),
+           :ok <- write_superpower_file(ctx.workspace, path, superpower_artifact_text(ctx, cycle)),
+           {:ok, _event} <-
+             append_once_event(ctx.issue, "superpower_artifact_written", %{
+               phase: ctx.phase,
+               path: path,
+               mode: SuperPower.mode(superpower) |> Atom.to_string()
+             }) do
+        :ok
+      else
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp write_superpower_file(workspace, path, contents) do
+    destination = if Path.type(path) == :relative, do: Path.join(workspace, path), else: path
+
+    with :ok <- File.mkdir_p(Path.dirname(destination)) do
+      File.write(destination, contents)
+    end
+  end
+
+  defp superpower_artifact_text(ctx, cycle) do
+    """
+    # #{ctx.phase} artifact
+
+    Task: #{task_id(ctx.issue)}
+    Title: #{Map.get(ctx.issue, :title) || ""}
+    Cycle: #{cycle}
+
+    This artifact mirrors the frozen Duet #{ctx.phase} state. The append-only
+    event log remains the machine source of truth.
+    """
+  end
+
+  defp existing_turn(issue, phase, cycle, actor) do
     case EventLog.read(issue) do
       {:ok, events} ->
         events
-        |> Enum.find(&event_matches?(&1, "turn_response", %{"phase" => @phase, "cycle" => cycle, "actor" => actor}))
+        |> Enum.find(&event_matches?(&1, "turn_response", %{"phase" => phase, "cycle" => cycle, "actor" => actor}))
         |> turn_from_event()
 
       {:error, reason} ->
@@ -369,15 +764,83 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp parse_verdict("REQUEST_CHANGES"), do: :request_changes
   defp parse_verdict(_other), do: nil
 
-  defp transcript_response(issue, cycle, actor, fallback) do
-    case Transcripts.read(issue, @phase, cycle, actor) do
+  defp transcript_response(issue, phase, cycle, actor, fallback) do
+    case Transcripts.read(issue, phase, cycle, actor) do
       {:ok, transcript} -> transcript |> String.split("## Response\n\n", parts: 2) |> List.last()
       {:error, _reason} -> fallback
     end
   end
 
-  defp phase_frozen?(issue, phase) do
-    event_recorded?(issue, "phase_frozen", %{"phase" => phase})
+  defp current_phase(issue) do
+    case EventLog.read(issue) do
+      {:ok, events} ->
+        frozen = frozen_phases(events)
+
+        cond do
+          reason = pending_awaiting_operator_reason(events) -> {:error, awaiting_error(reason)}
+          Enum.any?(events, &(Map.get(&1, "kind") == "task_completed")) -> {:ok, :completed}
+          true -> {:ok, Enum.find(@phases, &(!MapSet.member?(frozen, &1))) || :completed}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp pending_awaiting_operator_reason(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.reduce_while(nil, fn event, _acc ->
+      cond do
+        Map.get(event, "kind") in ["task_completed", "task_failed", "human_checkpoint_resolved"] ->
+          {:halt, nil}
+
+        reason = awaiting_reason_from_event(event) ->
+          {:halt, reason}
+
+        true ->
+          {:cont, nil}
+      end
+    end)
+  end
+
+  defp awaiting_reason_from_event(%{"kind" => "human_checkpoint_requested"}), do: "human_checkpoint"
+  defp awaiting_reason_from_event(%{"kind" => "phase_cap_escalation"}), do: "phase_cap_escalation"
+  defp awaiting_reason_from_event(%{"kind" => "code_pr_conflict"}), do: "code_pr_conflict"
+  defp awaiting_reason_from_event(%{"kind" => "superpower_artifact_rejected"}), do: "superpower_artifact_invalid"
+  defp awaiting_reason_from_event(%{"kind" => "phase_frozen", "awaiting_operator_reason" => reason}), do: reason
+
+  defp awaiting_reason_from_event(%{
+         "kind" => "verification_completed",
+         "status" => "timeout",
+         "reason" => "verification_timeout"
+       }),
+       do: "verification_timeout"
+
+  defp awaiting_reason_from_event(_event), do: nil
+
+  defp frozen_phases(events) do
+    events
+    |> Enum.filter(&(Map.get(&1, "kind") == "phase_frozen"))
+    |> Enum.map(&Map.get(&1, "phase"))
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp prior_phase_summaries(issue) do
+    case EventLog.read(issue) do
+      {:ok, events} ->
+        events
+        |> Enum.filter(&(Map.get(&1, "kind") == "phase_frozen"))
+        |> Map.new(fn event ->
+          phase = Map.get(event, "phase")
+          summary = Map.get(event, "summary") || "#{phase} frozen with mode #{Map.get(event, "mode", "unknown")}"
+          {phase, summary}
+        end)
+
+      {:error, _reason} ->
+        %{}
+    end
   end
 
   defp event_recorded?(issue, kind, match_attrs) do
@@ -394,6 +857,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
       else
         append_event(issue, kind, attrs)
       end
+    end
+  end
+
+  defp append_once_event(issue, kind, attrs) do
+    case append_once(issue, kind, attrs, Map.take(stringify_keys(attrs), ["phase", "cycle", "reason"])) do
+      :ok -> {:ok, %{}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -442,7 +912,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
         Keyword.get(ctx.opts, :tree_hash)
 
       provider = Keyword.get(ctx.opts, :tree_hash_provider) ->
-        call_tree_hash_provider(provider, ctx.workspace, @phase, cycle, actor)
+        call_tree_hash_provider(provider, ctx.workspace, ctx.phase, cycle, actor)
 
       true ->
         git_tree_hash(ctx.workspace)
@@ -488,4 +958,21 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
   defp stringify_keys(value) when is_list(value), do: Enum.map(value, &stringify_keys/1)
   defp stringify_keys(value), do: value
+
+  defp awaiting_reason(reason) when reason in @awaiting_reasons, do: Atom.to_string(reason)
+  defp awaiting_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp awaiting_reason(reason) when is_binary(reason), do: reason
+
+  defp awaiting_error(reason) do
+    case reason do
+      "pause_on_freeze" -> :pause_on_freeze
+      "code_pr_conflict" -> :code_pr_conflict
+      "human_checkpoint" -> :human_checkpoint
+      "verification_timeout" -> :verification_timeout
+      "superpower_artifact_invalid" -> :superpower_artifact_invalid
+      "phase_cap_escalation" -> :phase_cap_escalation
+      "state_divergence" -> :state_divergence
+      other -> {:awaiting_operator, other}
+    end
+  end
 end

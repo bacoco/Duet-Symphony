@@ -28,22 +28,22 @@ as the artifact and convergence substrate.
 - `spec/SPEC.md` is the source of truth.
 - `elixir/` contains the Symphony-derived Elixir implementation imported from
   OpenAI Symphony. It preserves Apache-2.0 license/NOTICE attribution.
-- The first Duet implementation slice is in place: the escript binary is
-  `duet-symphony`, `Config.Schema` parses a minimal `duet:` block,
+- The first Duet implementation slices are in place: the escript binary is
+  `duet-symphony`, `Config.Schema` parses the Duet config blocks,
   `RunnerSelector` keeps `AgentRunner` as the default compatibility runner,
-  and `Duet.PairRunner.run/3` is a tested `{:error, :not_implemented}` stub.
+  and `Duet.PairRunner.run/3` now drives the local Claude/Codex phase
+  pipeline behind `duet.enabled: true`.
 - The shared runner runtime slice is also in place: `RunnerRuntime` owns
   worker-host selection, workspace creation, runtime notifications, and
   run hooks for both `AgentRunner` and `Duet.PairRunner`.
 - The first routing/config slice is in place: `Config.Schema.Duet` parses core
   phase-control settings, and `SymphonyElixir.Duet.Routing` validates and
   resolves built-in/custom routing profiles.
-- The first `.duet` persistence/recovery slices are in place: `Duet.EventLog`
+- The `.duet` persistence/recovery slices are in place: `Duet.EventLog`
   writes JSONL under `.duet/logs/tasks/<task_id>/events.jsonl`, `PairRunner`
-  emits the initial `task_started`, `agent_routing_selected`, and
-  `phase_started` events idempotently plus the current stub `task_failed`
-  marker, and `Duet.TaskState` reconstructs task/phase state while surfacing
-  routing divergence without discarding recovered state.
+  emits task/routing/phase/turn/freeze/gate events idempotently, and
+  `Duet.TaskState` reconstructs task/phase state while surfacing routing
+  divergence and `awaiting_operator` gates without discarding recovered state.
 - The first operator routing menu slice is in place: the observability
   dashboard and `/api/v1/duet/routing` can select the runtime Duet profile
   from the configured profiles, and `PairRunner` consumes that selection.
@@ -62,8 +62,8 @@ as the artifact and convergence substrate.
   `turn_response` (success), `trailer_rejected` (missing/malformed/
   position_invalid), or `low_confidence_approve` (warning) per spec
   §13.1, while binding the tree-hash to the orchestrator-supplied
-  value rather than any agent-claimed hash. It is wired for the first
-  Codex SPEC Author turn only.
+  value rather than any agent-claimed hash. It is now consumed by
+  `PairRunner` for SPEC, PLAN, CODE, and REVIEW turns.
 - The first phase-prompt builder slice is in place:
   `SymphonyElixir.Duet.PhasePrompt.build/1` produces a deterministic
   Author/Reviewer prompt for a given phase + cycle + role + routing
@@ -84,15 +84,19 @@ as the artifact and convergence substrate.
   `summary_word_target/2` returns the adaptive word budget per §8.4.
   `Duet.Transcripts.write/6` persists the §13.2 per-turn prompt+response
   to `<log_dir>/tasks/<task_id>/transcripts/<phase>-<cycle>-<actor>.md`.
-  `PairRunner` now consumes these pieces for the first real SPEC
-  Author→Reviewer loop.
-- The first wave-8 PairRunner slice is in place:
-  `PairRunner` resolves the selected SPEC author/reviewer actors, selects
-  their `TurnDriver`s, records `turn_request` / `turn_response`, writes
-  transcripts, evaluates `Duet.ConvergenceOrchestrator`, continues cycles
-  after reviewer `REQUEST_CHANGES`, and emits `phase_frozen` on SPEC
-  convergence. A frozen SPEC currently stops future continuation dispatch
-  with `{:error, :plan_not_implemented}` because PLAN is not wired yet.
+  `PairRunner` now consumes these pieces across the full SPEC → PLAN → CODE
+  → REVIEW local pair loop.
+- The wave-8 PairRunner orchestration slice is in place:
+  `PairRunner` resolves the selected profile for every phase, selects each
+  actor's `TurnDriver`, records/transcribes every turn, evaluates
+  `Duet.ConvergenceOrchestrator`, continues cycles after reviewer
+  `REQUEST_CHANGES`, freezes SPEC/PLAN/CODE/REVIEW in order, records
+  `task_completed` after REVIEW, injects `VerificationGate` evidence before
+  Reviewer dispatch, honors blocking `HumanCheckpoint`, `pause_on_freeze`,
+  `ToolProfile` prompt constraints, optional SuperPower mirror artifacts,
+  and optional REVIEW-time CODE PR conflict gates. GitHub PR creation/merge
+  side effects are still not executed; this slice records the machine-state
+  boundary where those side effects attach.
 - The convergence-engine pure helpers are in place:
   `Duet.Convergence` implements the §9.3 split-signal mapping and the
   §10.2 convergence rule (both APPROVE on same tree-hash);
@@ -108,7 +112,8 @@ as the artifact and convergence substrate.
   validates the §9.3 distinct-identity requirement (`Config.Schema`
   wiring is a future slice); `Duet.PhaseSummary` provides the v1 §8.4
   truncation strategy (`word_count/1`, `diff_line_count/1`,
-  `summarize/2`). None wired into PairRunner yet.
+  `summarize/2`). `ConvergenceOrchestrator` is wired into `PairRunner`;
+  identity/config hardening remains a future slice.
 - The phase-pipeline + v0.4 opt-in pure helpers are in place:
   `Duet.Metrics` derives §13.5 convergence metrics from the event log
   (`for_phase/2`, `for_task/1`, `forced_rate/2`); `Duet.PhaseTransition`
@@ -122,7 +127,8 @@ as the artifact and convergence substrate.
   provides the §8.7 data layer (`aggregate_status/1`, `build_block/2`,
   `timeout_block/1`, `validate_config/1`). `Config.Schema.Duet` now
   parses and validates `tool_profiles`, `verification_gate`, and
-  `superpower`. None wired into PairRunner yet.
+  `superpower`. `PairRunner` consumes `HumanCheckpoint`, `ToolProfile`,
+  `VerificationGate`, `PhaseTransition`, and `SuperPower`.
 - The operator-gate + GitHub-integration pure helpers are in place:
   `Duet.AwaitingOperator` enumerates the 7 spec-defined
   `awaiting_operator` reasons and translates each (reason, decision)
@@ -144,8 +150,13 @@ as the artifact and convergence substrate.
   `routing_override_applied` events. `Duet.NotificationHook` defines the
   no-op default hook surface for operator/failure notifications.
   `Duet.CredentialRedaction` centralizes §14 transcript redaction and is
-  used by `Duet.Transcripts`. None wired into PairRunner yet.
-- Full Claude/Codex duet orchestration is not implemented yet.
+  used by `Duet.Transcripts`. `PairRunner` consumes `PRConflict` for the
+  optional REVIEW mergeability gate; concrete `gh` PR side effects are still
+  future work.
+- Minimum local Claude/Codex duet orchestration is implemented. Remaining
+  Tier-1 work is hardening: real GitHub PR side effects, operator resolution
+  commands for `awaiting_operator`, end-to-end dispatcher tests, Codex Cloud
+  optional runtime, and documentation/CI polish.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
 - Preserve upstream compatibility. Prefer a fork/subtree/overlay strategy that
@@ -256,19 +267,26 @@ Completed first slice:
 24. Wire the first real SPEC phase pair loop in `PairRunner`: configured
     Author and Reviewer actors dispatch through `TurnDriver`, responses are
     recorded/transcribed, convergence/cycle-cap/pathological helpers decide
-    continue/freeze/fail, and converged SPEC emits `phase_frozen`. PLAN is
-    still not implemented.
+    continue/freeze/fail, and converged SPEC emits `phase_frozen`.
+25. Complete wave 8 local PairRunner orchestration: the same pair-loop driver
+    now advances SPEC, PLAN, CODE, and REVIEW across continuation dispatches;
+    REVIEW emits `task_completed`; `TaskState` recovers `awaiting_operator`
+    gates; verification, human checkpoint, pause-on-freeze, SuperPower mirror,
+    tool-profile prompt constraints, and optional CODE PR conflict gates are
+    wired without executing real GitHub PR side effects.
 
 Next slice:
 
-1. Extend the phase driver from SPEC to PLAN: start PLAN after a frozen SPEC,
-   reuse the same Author/Reviewer loop, preserve idempotent recovery from
-   existing events, and stop before CODE wiring.
+1. Start wave 9 hardening: add end-to-end dispatcher tests for `duet.enabled`,
+   wire operator resolution commands/events for `awaiting_operator`, attach
+   real `GhCli` PR open/ready/merge/comment/review side effects at the
+   `PhaseTransition.freeze_actions/1` boundaries, and extend CI/docs around
+   the runnable local pair loop.
 
 Subsequent slices:
 
-1. Add Codex Cloud as an
-   optional asynchronous runtime once the local pair loop works.
+1. Add Codex Cloud as an optional asynchronous runtime once the local pair
+   loop is hardened.
 2. Keep Claude Code structured print/stream-json as the Claude runtime path;
    do not rely on fragile TTY automation unless no better option exists.
 3. Add optional SuperPower artifact support under `docs/superpowers/` for
