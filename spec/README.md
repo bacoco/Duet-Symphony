@@ -8,7 +8,7 @@ in any language is here.
 
 | File | Purpose |
 |------|---------|
-| [`SPEC.md`](./SPEC.md) | Normative specification (v0.4.0). Defines architecture, agent routing, tool profiles, phase pipeline, verification gates, convergence protocol, failure modes, configuration, conformance, and implementation-defined items. |
+| [`SPEC.md`](./SPEC.md) | Normative specification (v0.4.1). Defines architecture, agent routing, tool profiles, phase pipeline, verification gates, convergence protocol, failure modes, configuration, conformance, and implementation-defined items. |
 
 ## Reading order
 

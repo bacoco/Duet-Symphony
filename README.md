@@ -44,7 +44,7 @@ Apache-2.0 license and NOTICE attribution.
 Duet-Symphony/
 ├── spec/                  # Language-agnostic specification (standalone)
 │   ├── README.md          #   Reading guide for implementers
-│   └── SPEC.md            #   Normative spec v0.4.0
+│   └── SPEC.md            #   Normative spec v0.4.1
 ├── AGENTS.md              # Project handoff notes and implementation guidance
 ├── REVIEW.md              # Design review and risk backlog
 ├── README.md              # This file

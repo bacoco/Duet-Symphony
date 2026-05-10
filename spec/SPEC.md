@@ -1,6 +1,6 @@
 # Duet-Symphony Specification
 
-**Version:** 0.4.0 (draft)
+**Version:** 0.4.1 (draft)
 **Status:** Design — not yet implemented
 **Audience:** implementers building a Symphony-compatible Duet fork
 
@@ -529,26 +529,45 @@ with identical capabilities.
 duet:
   tool_profiles:
     enabled: false
+    default_profile: default
     profiles:
       default:
         # Unrestricted — agents keep their native tool set.
-        spec:   { author: all, reviewer: all }
-        plan:   { author: all, reviewer: all }
-        code:   { author: all, reviewer: all }
+        spec:   { author: all, reviewers: { default: all } }
+        plan:   { author: all, reviewers: { default: all } }
+        code:   { author: all, reviewers: { default: all } }
         review: { coder_ack: all, reviewer: all }
       strict_review:
         # Reviewer cannot write files or push commits during CODE.
-        spec:   { author: all, reviewer: all }
-        plan:   { author: all, reviewer: all }
-        code:   { author: [file_write, git_push, shell], reviewer: [file_read, git_diff, shell_readonly] }
+        spec:   { author: all, reviewers: { default: all } }
+        plan:   { author: all, reviewers: { default: all } }
+        code:
+          author: [file_write, git_push, shell]
+          reviewers:
+            default: [file_read, git_diff, shell_readonly]
+            claude: [file_read, git_diff, shell_readonly, web_search]
         review: { coder_ack: [file_read, git_diff], reviewer: [file_read, git_diff, shell_readonly, web_search] }
 ```
+
+For SPEC, PLAN, and CODE, `author` describes the single effective Author role
+and `reviewers` describes every configured Reviewer from the active routing
+profile (§7.7). `reviewers.default` applies to each Reviewer unless an
+actor-specific key (`claude`, `codex`, or `human`) overrides it. For REVIEW,
+the role names remain `coder_ack` and `reviewer` because REVIEW has the
+special split-signal semantics defined in §9.3.
 
 Tool identifiers are implementation-defined (§17). Implementations MUST
 document which identifiers they support and how they map to runtime
 capabilities. If an agent requests a tool that its profile disallows, the
-orchestrator MUST block the call and include the denial in the agent's next
-prompt context.
+orchestrator MUST block the call, emit a `tool_denied` event (§13.1), and
+include the denial in the agent's next prompt context.
+
+Some transports cannot enforce tool profiles directly. In `github_bot` mode
+or any external bot mode where the orchestrator cannot intercept tool calls,
+tool profiles are advisory prompt constraints unless the implementation
+documents a stronger enforcement mechanism. In advisory mode, violations may
+not be observable, and the orchestrator MUST NOT emit `tool_denied` unless it
+actually observes and blocks a disallowed call.
 
 Tool profiles are orthogonal to agent routing profiles (§7.7). A `full_duet`
 routing profile MAY be combined with any tool profile. Tool profile violations
@@ -798,10 +817,14 @@ next turn is dispatched**:
 
 1. The orchestrator triggers the configured verification command or waits for
    the configured GitHub status check context(s) to report.
-2. If the check times out (`verification_timeout_ms`), the orchestrator
-   proceeds with a `verification_timeout` warning injected into the Reviewer
-   prompt. The Reviewer MAY still approve or reject on other grounds.
-3. If checks complete, the orchestrator injects a structured block into the
+2. The orchestrator aggregates the configured source(s). In `github_checks` or
+   `local_command` mode, the single source decides the status. In `both` mode,
+   the aggregated status is `fail` if any completed source fails, `timeout` if
+   every configured source times out, `partial` if at least one source times out
+   and at least one source completes, and `pass` only when every configured
+   source passes.
+3. If verification completes or times out in warning mode, the orchestrator
+   injects a structured block into the
    Reviewer's prompt:
    ```
    ---DUET-VERIFICATION---
@@ -818,6 +841,12 @@ next turn is dispatched**:
 4. The Reviewer is instructed to weigh verification results but retains
    autonomy: a `fail` status does not force `REQUEST_CHANGES`, and a `pass`
    does not force `APPROVE`. The signal is informational, not binding.
+
+The verification block is system evidence, not an agent turn. Injecting it
+MUST NOT increment the phase cycle counter. If verification is configured for a
+phase that does not produce a new candidate commit before the next Reviewer
+turn, the orchestrator MUST skip the gate and emit `verification_completed`
+with `status = partial` and `reason = no_candidate_revision`.
 
 Configuration:
 
@@ -839,10 +868,31 @@ duet:
 
 When `on_timeout` is `block`, the orchestrator transitions the task to
 `awaiting_operator` with `reason = verification_timeout` instead of
-proceeding. The operator resumes via `duet resolve`.
+proceeding. The operator resumes via `duet resolve <task_id> --continue`.
 
 The orchestrator MUST emit a `verification_completed` event (§13.1) with the
-aggregated status and per-check results after each gate execution.
+aggregated status and per-check results after each gate execution. Timeout is
+represented as `verification_completed.status = timeout`; there is no separate
+timeout event kind.
+
+### 8.8 Gate composition
+
+Optional gates are composed in a fixed order so implementations do not diverge
+when several gates are enabled:
+
+1. Author produces or pushes the candidate artifact.
+2. SuperPower artifact checks run when `duet.superpower.mode = enforce` (§8.5).
+3. Verification gate runs before the next Reviewer turn (§8.7).
+4. Reviewer turn runs and normal convergence or tie-breaker logic applies
+   (§10.2 through §10.4).
+5. Human checkpoint runs after machine convergence or tie-breaker selection
+   and before freeze side effects (§8.6).
+6. Phase freeze side effects execute (§8.3).
+7. `pause_on_freeze`, when enabled, blocks after freeze and before the next
+   phase dispatch (§8.3).
+
+If any gate transitions the task to `awaiting_operator`, later gates in this
+sequence MUST wait until the operator resolves the pending state.
 
 ---
 
@@ -891,9 +941,11 @@ downstream CI integrations that react only to ready-for-review PRs.
 The lifecycle is:
 
 1. **Phase start:** Orchestrator creates the phase sub-branch, pushes an
-   initial empty or scaffold commit, and opens a draft PR with the standard
-   title format (§9.4). The PR body includes the task description, active
-   routing profile, and a note that the PR is in-progress.
+   initial empty or scaffold commit authored by the orchestrator identity
+   rather than either agent, and opens a draft PR with the standard title
+   format (§9.4). The PR body includes the task description, active routing
+   profile, and a note that the PR is in-progress. The orchestrator MUST emit
+   `pr_draft_opened`.
 2. **During the pair-loop:** Author commits are pushed to the phase
    sub-branch. The draft PR updates automatically via GitHub's branch
    tracking. Reviewer comments and Author trailers are posted as PR
@@ -902,6 +954,7 @@ The lifecycle is:
    (removes draft status) immediately before executing the freeze side
    effects (§8.3). For the CODE PR that spans CODE and REVIEW phases, the
    draft-to-ready transition happens at CODE freeze, before REVIEW begins.
+   The orchestrator MUST emit `pr_marked_ready`.
 
 When `open_as_draft` is `false` (default), the orchestrator opens PRs as
 ready-for-review at the point it would otherwise create them, preserving
@@ -1148,6 +1201,7 @@ deadlock.
 | Cycle cap reached (CODE, override) | Operator set `code_phase_cap_policy: forced` or `fail` | Apply chosen override (§10.4.2) |
 | Pathological disagreement | §10.5 detector | Mark task `failed` |
 | SuperPower artifact invalid | `duet.superpower.mode = enforce` and template checks still fail at cycle cap | Transition to `awaiting_operator` with `reason = superpower_artifact_invalid`; emit `superpower_artifact_rejected`; await operator override, enforcement disable, or fail (§8.5) |
+| Verification timeout (block mode) | `duet.verification_gate.on_timeout = block` and configured verification source exceeds timeout | Transition to `awaiting_operator` with `reason = verification_timeout`; emit `verification_completed` with `status = timeout`; await `duet resolve <task_id> --continue` (§8.7) |
 | Human checkpoint pending | Blocking human checkpoint enabled for phase | Transition to `awaiting_operator` with `reason = human_checkpoint`; await approve, request changes, or fail (§8.6) |
 | Human checkpoint timeout | `human_checkpoints.timeout_ms` exceeded | Keep task in `awaiting_operator` and emit notification; do not auto-approve |
 | Context exhaustion | Agent runtime signal or sentinel | Restart/fork runtime with recovery message; not a task failure |
@@ -1336,9 +1390,9 @@ duet:
     default_profile: default
     profiles:
       default:
-        spec:   { author: all, reviewer: all }
-        plan:   { author: all, reviewer: all }
-        code:   { author: all, reviewer: all }
+        spec:   { author: all, reviewers: { default: all } }
+        plan:   { author: all, reviewers: { default: all } }
+        code:   { author: all, reviewers: { default: all } }
         review: { coder_ack: all, reviewer: all }
   metrics:
     enabled: false
@@ -1375,6 +1429,26 @@ Agent routing validation rules:
   dispatch.
 - If `duet.human_checkpoints.enabled` is `true`, each configured phase value
   MUST be boolean and `default_mode` MUST be `blocking` or `advisory`.
+- If `duet.tool_profiles.enabled` is `true`,
+  `duet.tool_profiles.default_profile` MUST name an existing tool profile.
+  Tool profile phase keys MUST be limited to `spec`, `plan`, `code`, and
+  `review`. SPEC, PLAN, and CODE entries MUST use `author` plus `reviewers`;
+  REVIEW entries MUST use `coder_ack` plus `reviewer`. A tool set MUST be
+  either `all` or a non-empty list of implementation-supported tool
+  identifiers. `reviewers` MUST contain `default` or actor-specific keys that
+  match declared routing actors.
+- If `duet.verification_gate.enabled` is `true`, `mode` MUST be
+  `github_checks`, `local_command`, or `both`; `phases` MUST contain only
+  supported phase names; `inject_into` MUST be `reviewer` or `both`; and
+  `on_timeout` MUST be `warn` or `block`. `github_checks` mode MUST define a
+  positive `github_checks.timeout_ms`; `local_command` mode MUST define a
+  non-empty `local_command.run` and positive `local_command.timeout_ms`; `both`
+  mode MUST satisfy both sub-block requirements.
+- `duet.pr_lifecycle.open_as_draft` MUST be boolean when present.
+- If `duet.metrics.enabled` is `true`, `forced_rate_window` MUST be a positive
+  integer. If `duet.metrics.otel.enabled` is `true`, the implementation MUST
+  have either a non-null configured endpoint or a documented
+  `OTEL_EXPORTER_OTLP_ENDPOINT` fallback.
 
 `duet config validate` MUST report the profile name, phase, and role that
 caused each validation error.
@@ -1422,8 +1496,8 @@ Event `kind` values: `task_queued`, `task_started`, `workspace_created`,
 `code_pr_conflict`, `state_divergence`, `agent_routing_selected`,
 `routing_override_applied`, `superpower_artifact_written`,
 `superpower_artifact_rejected`, `human_checkpoint_requested`,
-`human_checkpoint_resolved`, `verification_completed`, `verification_timeout`,
-`tool_denied`, `pr_draft_opened`, `pr_marked_ready`.
+`human_checkpoint_resolved`, `verification_completed`, `tool_denied`,
+`pr_draft_opened`, `pr_marked_ready`.
 
 ### 13.2 Per-turn transcripts
 
@@ -1501,7 +1575,7 @@ profiles, tool profiles) based on observed behavior rather than guesswork.
 | `cycles_to_converge` | Number of Author→Reviewer round-trips before freeze |
 | `convergence_mode` | `natural` (both APPROVE) or `forced` (tie-breaker at cap) |
 | `confidence_delta` | `abs(author_final_confidence - reviewer_final_confidence)` |
-| `forced_rate` | Rolling ratio of `forced` freezes over last N tasks (N = implementation-defined, default 20) |
+| `forced_rate` | Rolling ratio of `forced` freezes over the last N phase instances of the same phase type (N = `duet.metrics.forced_rate_window`, default 20) |
 | `mean_cycle_duration_ms` | Mean wall-clock time per cycle within the phase |
 | `verification_pass_rate` | Ratio of verification gates that passed on first check (§8.7); null when gate is disabled |
 
@@ -1510,7 +1584,7 @@ profiles, tool profiles) based on observed behavior rather than guesswork.
 | Metric | Definition |
 |--------|-----------|
 | `total_cycles` | Sum of `cycles_to_converge` across all phases |
-| `convergence_velocity` | `total_phases / total_cycles` (1.0 = single-cycle convergence everywhere) |
+| `convergence_velocity` | `total_phases / total_cycles` for SPEC, PLAN, and CODE; REVIEW is excluded unless an implementation models REVIEW as an iterative Author→Reviewer phase |
 | `escalation_count` | Number of phases that reached cap or triggered pathological disagreement |
 | `degraded_phases` | Count of phases where convergence was degraded (§10.2) |
 
@@ -1569,6 +1643,9 @@ duet profiles list
 duet profiles show <profile_name>
 duet checkpoint resolve --id <task_id> --phase SPEC|PLAN|CODE|REVIEW \
   --decision approve|request_changes|fail [--feedback-file <path>]
+duet resolve <task_id> --continue
+duet resolve <task_id> (--approve-author | --approve-reviewer | --fail) \
+  [--feedback-file <path>]
 duet abandon --id <task_id>      # graceful: closes PRs if any, releases claim, removes workspace
 duet prune                       # deletes merged duet-base/* and duet-phase/* branches
 
@@ -1609,6 +1686,10 @@ A conformant implementation MAY:
 - Choose any host language.
 - Add additional tracker/queue/ingest sources beyond Linear and manual CLI.
 - Add or extend an HTTP API or dashboard.
+- Support optional v0.4 features including tool profiles (§7.8),
+  verification gates (§8.7), draft PR lifecycle (§9.2.1), and convergence
+  metrics export (§13.5), provided unsupported features fail validation
+  clearly when enabled.
 - Add additional hook points so long as the contract above is preserved.
 
 ---
