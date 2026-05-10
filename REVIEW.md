@@ -72,7 +72,7 @@ L'intégration Linear comme tracker first-class et le CLI `duet run` comme exten
 ### R4 — Pause-on-freeze opérateur
 **Risque :** En early adoption, un opérateur veut vérifier chaque artifact frozen avant de laisser le pair-loop continuer. Pas de mécanisme prévu.
 **Impact :** Obligation de laisser tourner en aveugle ou de surveiller manuellement les PRs.
-**Action recommandée :** Ajouter `duet.pause_on_freeze: true|false` (default `false`). Quand activé, la task passe en `awaiting_operator` après chaque phase-freeze, avec `duet resolve <task_id> --continue` pour reprendre. Correspond à la question ouverte §18.10.
+**Action recommandée :** Ajouter `duet.pause_on_freeze: true|false` (default `false`). Quand activé, la task passe en `awaiting_operator` après chaque phase-freeze, avec `duet resolve <task_id> --continue` pour reprendre. Intégré désormais dans §8.3 et §12.
 
 ### R5 — Résumé de phase-freeze adaptatif
 **Risque :** Le cap de ~1500 mots (§8.4) est un guess fixe. Un SPEC de 200 mots n'a pas besoin de 1500 mots de résumé ; un CODE diff de 2000 lignes en a besoin de plus.
