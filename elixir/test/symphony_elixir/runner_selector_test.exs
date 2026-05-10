@@ -1,6 +1,7 @@
 defmodule SymphonyElixir.RunnerSelectorTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Duet.EventLog
   alias SymphonyElixir.Duet.PairRunner
   alias SymphonyElixir.RunnerSelector
 
@@ -54,6 +55,7 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       )
 
       issue = %Issue{id: "issue-duet-lifecycle", identifier: "DUET-LIFE"}
+      EventLog.set_root(Path.join(test_root, ".duet/logs"))
 
       assert {:error, :not_implemented} = PairRunner.run(issue, self(), [])
 
@@ -70,6 +72,15 @@ defmodule SymphonyElixir.RunnerSelectorTest do
       assert File.read!(Path.join(workspace_path, "after_create.txt")) == "created"
       assert File.read!(Path.join(workspace_path, "before_run.txt")) == "before"
       assert File.read!(Path.join(workspace_path, "after_run.txt")) == "after"
+
+      assert {:ok, [event]} = EventLog.read(issue)
+      assert event["kind"] == "agent_routing_selected"
+      assert event["task_id"] == "issue-duet-lifecycle"
+      assert event["profile_name"] == "duet_balanced"
+      assert event["mode"] == "full_duet"
+      assert event["degraded"] == false
+      assert event["phases"]["spec"]["author"] == "claude"
+      assert event["phases"]["spec"]["reviewers"] == ["codex"]
     after
       File.rm_rf(test_root)
     end

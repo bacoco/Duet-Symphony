@@ -21,6 +21,7 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.AgentRunner,
           SymphonyElixir.RunnerRuntime,
           SymphonyElixir.Duet.Routing,
+          SymphonyElixir.Duet.EventLog,
           SymphonyElixir.CLI,
           SymphonyElixir.Codex.AppServer,
           SymphonyElixir.Codex.DynamicTool,

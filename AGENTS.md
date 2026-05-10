@@ -38,6 +38,9 @@ as the artifact and convergence substrate.
 - The first routing/config slice is in place: `Config.Schema.Duet` parses core
   phase-control settings, and `SymphonyElixir.Duet.Routing` validates and
   resolves built-in/custom routing profiles.
+- The first `.duet` persistence slice is in place: `Duet.EventLog` writes JSONL
+  under `.duet/logs/tasks/<task_id>/events.jsonl`, and `PairRunner` emits
+  `agent_routing_selected`.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -78,9 +81,9 @@ Completed first slice:
 
 Next slice:
 
-1. Add persistent Duet task/phase event state under `.duet/` behind
-   `duet.enabled`, using the resolved routing profile but still making no
-   external Claude/Codex calls.
+1. Add Duet task/phase state reconstruction from `.duet` event logs, then
+   introduce phase state events (`task_started`, `phase_started`) behind
+   `duet.enabled`.
 
 Subsequent slices:
 

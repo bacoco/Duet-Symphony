@@ -7,8 +7,8 @@ Status: **implementation baseline imported**. The full design lives in
 [`spec/SPEC.md`](./spec/SPEC.md). The current Elixir slice preserves Symphony's
 default single-Codex behavior, renames the binary to `duet-symphony`, parses a
 minimal `duet:` config block, extracts shared runner workspace lifecycle, and
-adds tested Duet routing profile resolution. Full Claude/Codex duet
-orchestration is not implemented yet.
+adds tested Duet routing profile resolution plus initial `.duet` JSONL event
+logging. Full Claude/Codex duet orchestration is not implemented yet.
 
 ## In one paragraph
 

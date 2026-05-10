@@ -4,6 +4,7 @@ defmodule SymphonyElixir.LogFile do
   """
 
   require Logger
+  alias SymphonyElixir.Duet.EventLog
 
   @handler_id :symphony_disk_log
   @default_log_relative_path "log/symphony.log"
@@ -18,6 +19,11 @@ defmodule SymphonyElixir.LogFile do
   @spec default_log_file(Path.t()) :: Path.t()
   def default_log_file(logs_root) when is_binary(logs_root) do
     Path.join(logs_root, @default_log_relative_path)
+  end
+
+  @spec default_duet_event_log_root(Path.t()) :: Path.t()
+  def default_duet_event_log_root(logs_root) when is_binary(logs_root) do
+    EventLog.default_root(logs_root)
   end
 
   @spec configure() :: :ok

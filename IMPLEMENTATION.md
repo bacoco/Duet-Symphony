@@ -235,6 +235,19 @@ The first routing/config slice is complete.
   degraded profiles.
 - No external Claude/Codex calls are introduced in this slice.
 
+## Duet Event Log Status
+
+The first `.duet` persistence slice is complete.
+
+- `SymphonyElixir.Duet.EventLog` appends and reads newline-delimited JSON under
+  `.duet/logs/tasks/<task_id>/events.jsonl`.
+- `--logs-root` now also relocates the Duet event log root to
+  `<logs_root>/.duet/logs`.
+- `Duet.PairRunner` emits `agent_routing_selected` with the resolved profile
+  name, mode, degraded flag, and phase matrix before returning its current
+  stub result.
+- No recovery logic or Claude/Codex runtime calls are introduced in this slice.
+
 ## Local Modifications Inside elixir/
 
 The files listed below carry Duet-specific deltas on top of the upstream
@@ -251,7 +264,10 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
 | `lib/symphony_elixir/config/schema.ex` | routing config slice | added embedded `Duet` schema with core phase/routing fields and routing validation |
 | `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
+| `lib/symphony_elixir/duet/pair_runner.ex` | event log slice | emits `agent_routing_selected` through the Duet event log before returning the stub result |
+| `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
+| `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
 | `test/symphony_elixir/core_test.exs` | first runner slice | added assertions covering `duet.enabled` defaulting and parsing |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
 
@@ -259,8 +275,10 @@ this section in sync with the modifications applied per slice.
 
 - `lib/symphony_elixir/runner_runtime.ex`
 - `lib/symphony_elixir/runner_selector.ex`
+- `lib/symphony_elixir/duet/event_log.ex`
 - `lib/symphony_elixir/duet/routing.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
+- `test/symphony_elixir/duet_event_log_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
 
