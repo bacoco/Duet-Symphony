@@ -230,8 +230,9 @@ The first routing/config slice is complete.
   `duet.agent_routing`, including built-in `duet_balanced`,
   `codex_only_dev`, and `claude_only_dev` profiles.
 - Full Duet profiles are validated to require distinct Claude/Codex machine
-  signals for SPEC, PLAN, and CODE. Profiles that intentionally skip reviewers
-  remain valid only as degraded profiles.
+  signals for SPEC, PLAN, and CODE. A full Duet Reviewer list must not include
+  the Author. Profiles that intentionally skip reviewers remain valid only as
+  degraded profiles.
 - No external Claude/Codex calls are introduced in this slice.
 
 ## Local Modifications Inside elixir/

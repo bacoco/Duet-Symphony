@@ -1416,7 +1416,9 @@ Agent routing validation rules:
 - Each profile MUST declare `mode: full_duet` or a documented degraded mode.
 - A `full_duet` profile MUST define `SPEC`, `PLAN`, and `CODE` with exactly
   one machine Author (`claude` or `codex`) and at least one machine Reviewer.
-  At least one Reviewer MUST be distinct from the Author.
+  Reviewers MUST NOT include the Author. The split-signal model in §9.3
+  requires two distinct GitHub identities, and including the Author in the
+  Reviewer list adds no convergence value.
 - A `full_duet` profile MUST define REVIEW so the coder acknowledgement and
   reviewer resolve to distinct GitHub identities under §9.3. `human` and
   `none` are not valid binding roles in a `full_duet` profile.

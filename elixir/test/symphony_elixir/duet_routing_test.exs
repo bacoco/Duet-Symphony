@@ -101,4 +101,84 @@ defmodule SymphonyElixir.DuetRoutingTest do
     assert message =~ "bad_full"
     assert message =~ "spec"
   end
+
+  test "duet routing rejects full duet profiles with a non-machine author" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      duet_yaml: """
+      duet:
+        enabled: true
+        agent_routing:
+          default_profile: human_full
+          profiles:
+            human_full:
+              mode: full_duet
+              phases:
+                spec:   { author: human, reviewers: [codex] }
+                plan:   { author: codex, reviewers: [claude] }
+                code:   { author: codex, reviewers: [claude] }
+                review: { coder_ack: code_author, reviewer: non_coder }
+      """
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "full_duet_author_not_machine"
+    assert message =~ "human_full"
+    assert message =~ "spec"
+  end
+
+  test "duet routing rejects full duet profiles that include the author as reviewer" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      duet_yaml: """
+      duet:
+        enabled: true
+        agent_routing:
+          default_profile: self_review
+          profiles:
+            self_review:
+              mode: full_duet
+              phases:
+                spec:   { author: codex, reviewers: [codex, claude] }
+                plan:   { author: codex, reviewers: [claude] }
+                code:   { author: codex, reviewers: [claude] }
+                review: { coder_ack: code_author, reviewer: non_coder }
+      """
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "full_duet_self_review"
+    assert message =~ "self_review"
+    assert message =~ "spec"
+  end
+
+  test "duet routing rejects unknown default profiles" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      duet_yaml: """
+      duet:
+        enabled: true
+        agent_routing:
+          default_profile: missing_profile
+      """
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "unknown_default_profile"
+    assert message =~ "missing_profile"
+  end
+
+  test "duet config rejects invalid phase controls" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      duet_yaml: """
+      duet:
+        enabled: true
+        max_cycles_per_phase: 0
+        phase_turn_timeout_ms: -1
+        code_phase_cap_policy: auto_merge
+      """
+    )
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "max_cycles_per_phase"
+    assert message =~ "phase_turn_timeout_ms"
+    assert message =~ "code_phase_cap_policy"
+  end
 end
