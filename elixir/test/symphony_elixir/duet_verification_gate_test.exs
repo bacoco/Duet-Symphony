@@ -20,12 +20,13 @@ defmodule SymphonyElixir.DuetVerificationGateTest do
       assert VerificationGate.aggregate_status([:pass, :fail]) == :partial
     end
 
-    test ":timeout dominates over :pass" do
-      assert VerificationGate.aggregate_status([:pass, :timeout]) == :timeout
+    test ":timeout mixed with completed checks aggregates to :partial" do
+      assert VerificationGate.aggregate_status([:pass, :timeout]) == :partial
+      assert VerificationGate.aggregate_status([:fail, :timeout]) == :partial
     end
 
-    test ":timeout dominates over :fail" do
-      assert VerificationGate.aggregate_status([:fail, :timeout]) == :timeout
+    test "all :timeout aggregates to :timeout" do
+      assert VerificationGate.aggregate_status([:timeout, :timeout]) == :timeout
     end
 
     test "single :partial aggregates to :partial" do
@@ -34,10 +35,6 @@ defmodule SymphonyElixir.DuetVerificationGateTest do
 
     test "invalid status falls back to :partial" do
       assert VerificationGate.aggregate_status([:pass, :bogus]) == :partial
-    end
-
-    test "all :timeout aggregates to :timeout" do
-      assert VerificationGate.aggregate_status([:timeout, :timeout]) == :timeout
     end
 
     test "single :pass aggregates to :pass" do
@@ -134,6 +131,22 @@ defmodule SymphonyElixir.DuetVerificationGateTest do
       assert output =~ "    status: fail"
       assert output =~ "    status: partial"
       assert output =~ "    status: timeout"
+    end
+
+    test "escapes quotes, backslashes, newlines, and Duet markers in text fields" do
+      checks = [
+        %{
+          name: "ci/\"tests\"",
+          status: :fail,
+          summary: "line one\nline two \\ #{VerificationGate.end_marker()}"
+        }
+      ]
+
+      output = VerificationGate.build_block(checks, :fail)
+
+      assert output =~ ~s(  - name: "ci/\\"tests\\"")
+      assert output =~ ~s(summary: "line one\\nline two \\\\ [DUET_VERIFICATION_MARKER_REDACTED]")
+      refute output =~ VerificationGate.end_marker() <> "\""
     end
   end
 

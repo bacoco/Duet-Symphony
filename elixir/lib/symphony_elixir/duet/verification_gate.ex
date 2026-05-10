@@ -22,15 +22,9 @@ defmodule SymphonyElixir.Duet.VerificationGate do
           summary: "3 ESLint errors in src/auth.ts"
       ---END-DUET-VERIFICATION---
 
-  ## Caveat: YAML escaping is the caller's responsibility
-
-  Check names and summaries are emitted between double quotes but this
-  module does NOT escape internal double quotes, backslashes, or other
-  YAML-special characters. Callers passing arbitrary CI output as
-  `:summary` MUST sanitize it themselves before invoking `build_block/2`
-  or `timeout_block/1`. v1 deliberately avoids depending on a YAML
-  library; the Reviewer prompt is read by an LLM and the unescaped
-  format is acceptable for that consumer.
+  Check names and summaries are JSON-escaped before being embedded in
+  the YAML-like block so arbitrary CI output cannot break the structured
+  evidence section.
   """
 
   @start_marker "---DUET-VERIFICATION---"
@@ -51,8 +45,8 @@ defmodule SymphonyElixir.Duet.VerificationGate do
   Rules:
 
   - `[]` → `:partial` (no checks yet — neither pass nor fail).
-  - any `:timeout` in the list → `:timeout` (timeout dominates because
-    spec §8.7 treats it as a distinct state).
+  - all `:timeout` → `:timeout`.
+  - any `:timeout` mixed with a completed check → `:partial`.
   - all `:pass` → `:pass`.
   - all `:fail` → `:fail`.
   - mixed `:pass` / `:fail` (no timeout) → `:partial`.
@@ -65,7 +59,8 @@ defmodule SymphonyElixir.Duet.VerificationGate do
   def aggregate_status(check_statuses) when is_list(check_statuses) do
     cond do
       not Enum.all?(check_statuses, &valid_status?/1) -> :partial
-      :timeout in check_statuses -> :timeout
+      Enum.all?(check_statuses, &(&1 == :timeout)) -> :timeout
+      :timeout in check_statuses -> :partial
       Enum.all?(check_statuses, &(&1 == :pass)) -> :pass
       Enum.all?(check_statuses, &(&1 == :fail)) -> :fail
       Enum.all?(check_statuses, &(&1 == :partial)) -> :partial
@@ -86,7 +81,7 @@ defmodule SymphonyElixir.Duet.VerificationGate do
   - When `checks` is empty, `checks: []` is emitted on a single line.
   - The block ends with `---END-DUET-VERIFICATION---` on its own line.
 
-  Caller is responsible for sanitizing names/summaries — see moduledoc.
+  Names and summaries are escaped before rendering.
   """
   @spec build_block([check()], status()) :: String.t()
   def build_block(checks, overall_status) when is_list(checks) and is_atom(overall_status) do
@@ -160,14 +155,26 @@ defmodule SymphonyElixir.Duet.VerificationGate do
     summary = Map.get(check, :summary)
 
     base = [
-      "  - name: \"#{name}\"",
+      "  - name: #{quoted_value(name)}",
       "    status: #{render_status(status)}"
     ]
 
     case summary do
       nil -> base
       "" -> base
-      value when is_binary(value) -> base ++ ["    summary: \"#{value}\""]
+      value when is_binary(value) -> base ++ ["    summary: #{quoted_value(value)}"]
     end
+  end
+
+  defp quoted_value(value) when is_binary(value) do
+    value
+    |> neutralize_markers()
+    |> Jason.encode!()
+  end
+
+  defp neutralize_markers(value) do
+    value
+    |> String.replace(@start_marker, "[DUET_VERIFICATION_MARKER_REDACTED]")
+    |> String.replace(@end_marker, "[DUET_VERIFICATION_MARKER_REDACTED]")
   end
 end

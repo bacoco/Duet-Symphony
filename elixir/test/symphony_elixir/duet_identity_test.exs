@@ -106,6 +106,14 @@ defmodule SymphonyElixir.DuetIdentityTest do
                {:error, {:shared_identity, "shared-bot"}}
     end
 
+    test "treats case-only GitHub identity differences as shared" do
+      :ok = Identity.set_for_actor("claude", "Shared-Bot")
+      :ok = Identity.set_for_actor("codex", "shared-bot")
+
+      assert Identity.validate_distinct_machine_identities() ==
+               {:error, {:shared_identity, "Shared-Bot"}}
+    end
+
     test "returns :ok when both machine actors have distinct identities" do
       :ok = Identity.set_for_actor("claude", "claude-bot")
       :ok = Identity.set_for_actor("codex", "codex-bot")

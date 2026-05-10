@@ -177,6 +177,19 @@ defmodule SymphonyElixir.DuetTrailerTest do
     assert {:error, :malformed} = Trailer.parse(text)
   end
 
+  test "rejects a trailer with malformed confidence suffix text" do
+    text = """
+    ---DUET-TRAILER---
+    verdict: APPROVE
+    confidence: 0.9abc
+    summary: Not a clean number
+    unresolved: []
+    ---END-DUET-TRAILER---
+    """
+
+    assert {:error, :malformed} = Trailer.parse(text)
+  end
+
   test "rejects a trailer placed earlier than 50 lines from the end" do
     filler = String.duplicate("filler line\n", 60)
 

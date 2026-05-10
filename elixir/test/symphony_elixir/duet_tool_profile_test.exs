@@ -8,17 +8,20 @@ defmodule SymphonyElixir.DuetToolProfileTest do
     "default_profile" => "strict_review",
     "profiles" => %{
       "default" => %{
-        "spec" => %{"author" => "all", "reviewer" => "all"},
-        "plan" => %{"author" => "all", "reviewer" => "all"},
-        "code" => %{"author" => "all", "reviewer" => "all"},
+        "spec" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+        "plan" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+        "code" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
         "review" => %{"coder_ack" => "all", "reviewer" => "all"}
       },
       "strict_review" => %{
-        "spec" => %{"author" => "all", "reviewer" => "all"},
-        "plan" => %{"author" => "all", "reviewer" => "all"},
+        "spec" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
+        "plan" => %{"author" => "all", "reviewers" => %{"default" => "all"}},
         "code" => %{
           "author" => ["file_write", "git_push", "shell"],
-          "reviewer" => ["file_read", "git_diff", "shell_readonly"]
+          "reviewers" => %{
+            "default" => ["file_read", "git_diff", "shell_readonly"],
+            "claude" => ["file_read", "git_diff", "shell_readonly", "web_search"]
+          }
         },
         "review" => %{
           "coder_ack" => ["file_read", "git_diff"],
@@ -88,7 +91,7 @@ defmodule SymphonyElixir.DuetToolProfileTest do
       config = %{
         "enabled" => true,
         "profiles" => %{
-          "p" => %{"code" => %{"author" => :all, "reviewer" => "all"}}
+          "p" => %{"code" => %{"author" => :all, "reviewers" => %{"default" => "all"}}}
         }
       }
 
@@ -126,6 +129,11 @@ defmodule SymphonyElixir.DuetToolProfileTest do
                ToolProfile.resolve(@strict_review_yaml_example, "strict_review", "code", "reviewer")
     end
 
+    test "code/reviewer supports actor-specific reviewer overrides" do
+      assert {:ok, ["file_read", "git_diff", "shell_readonly", "web_search"]} =
+               ToolProfile.resolve(@strict_review_yaml_example, "strict_review", "code", "reviewer", "claude")
+    end
+
     test "review/coder_ack with explicit list returns sorted list" do
       assert {:ok, ["file_read", "git_diff"]} =
                ToolProfile.resolve(@strict_review_yaml_example, "strict_review", "review", "coder_ack")
@@ -140,7 +148,12 @@ defmodule SymphonyElixir.DuetToolProfileTest do
       config = %{
         "enabled" => true,
         "profiles" => %{
-          "p" => %{"code" => %{"author" => ["shell", "file_write", "shell", "git_push"]}}
+          "p" => %{
+            "code" => %{
+              "author" => ["shell", "file_write", "shell", "git_push"],
+              "reviewers" => %{"default" => "all"}
+            }
+          }
         }
       }
 
@@ -170,7 +183,12 @@ defmodule SymphonyElixir.DuetToolProfileTest do
       config = %{
         "enabled" => true,
         "profiles" => %{
-          "p" => %{"code" => %{"author" => ["file_write", "rocket_launcher"]}}
+          "p" => %{
+            "code" => %{
+              "author" => ["file_write", "rocket_launcher"],
+              "reviewers" => %{"default" => "all"}
+            }
+          }
         }
       }
 
@@ -204,7 +222,7 @@ defmodule SymphonyElixir.DuetToolProfileTest do
         default_profile: "p",
         profiles: %{
           p: %{
-            code: %{author: ["file_write", "git_push"], reviewer: "all"},
+            code: %{author: ["file_write", "git_push"], reviewers: %{default: "all"}},
             review: %{coder_ack: :all, reviewer: ["file_read"]}
           }
         }
@@ -294,6 +312,17 @@ defmodule SymphonyElixir.DuetToolProfileTest do
       assert msg =~ "missing"
     end
 
+    test "implicit default_profile is rejected when enabled and default profile is absent" do
+      config = %{
+        "enabled" => true,
+        "profiles" => %{"strict_review" => %{}}
+      }
+
+      assert {:error, msg} = ToolProfile.validate_config(config)
+      assert msg =~ "default_profile"
+      assert msg =~ "default"
+    end
+
     test "default_profile missing-from-profiles is tolerated when feature is disabled" do
       config = %{
         "enabled" => false,
@@ -307,7 +336,7 @@ defmodule SymphonyElixir.DuetToolProfileTest do
     test "profile with unknown phase key is rejected" do
       config = %{
         "profiles" => %{
-          "p" => %{"deploy" => %{"author" => "all", "reviewer" => "all"}}
+          "p" => %{"deploy" => %{"author" => "all", "reviewers" => %{"default" => "all"}}}
         }
       }
 
@@ -343,7 +372,12 @@ defmodule SymphonyElixir.DuetToolProfileTest do
     test "role value with unknown tool is rejected" do
       config = %{
         "profiles" => %{
-          "p" => %{"code" => %{"author" => ["file_write", "rocket_launcher"]}}
+          "p" => %{
+            "code" => %{
+              "author" => ["file_write", "rocket_launcher"],
+              "reviewers" => %{"default" => "all"}
+            }
+          }
         }
       }
 
@@ -354,12 +388,35 @@ defmodule SymphonyElixir.DuetToolProfileTest do
     test "role value that is neither \"all\" nor a list is rejected" do
       config = %{
         "profiles" => %{
-          "p" => %{"code" => %{"author" => 42}}
+          "p" => %{"code" => %{"author" => 42, "reviewers" => %{"default" => "all"}}}
         }
       }
 
       assert {:error, msg} = ToolProfile.validate_config(config)
       assert msg =~ "tool_profiles.profiles.p.code.author"
+    end
+
+    test "empty tool lists are rejected" do
+      config = %{
+        "profiles" => %{
+          "p" => %{"code" => %{"author" => [], "reviewers" => %{"default" => "all"}}}
+        }
+      }
+
+      assert {:error, msg} = ToolProfile.validate_config(config)
+      assert msg =~ "must not be an empty tool list"
+    end
+
+    test "code phases must use reviewers map rather than direct reviewer role" do
+      config = %{
+        "profiles" => %{
+          "p" => %{"code" => %{"author" => "all", "reviewer" => "all"}}
+        }
+      }
+
+      assert {:error, msg} = ToolProfile.validate_config(config)
+      assert msg =~ "unknown key"
+      assert msg =~ "reviewer"
     end
 
     test "complete strict_review profile per the §7.8 YAML example is :ok" do

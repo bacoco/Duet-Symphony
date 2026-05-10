@@ -102,11 +102,11 @@ as the artifact and convergence substrate.
   open vs SPEC/PLAN merged); `Duet.HumanCheckpoint` reads the §8.6
   config (`mode_for_phase/2`, `resolve_decision/2`, REVIEW
   `:request_changes` returns to CODE per spec); `Duet.ToolProfile`
-  resolves §7.8 tool-profile constraints (`resolve/4`, `allows?/5`,
-  `validate_config/1`, `known_tools/0` for the §17 implementation-defined
-  identifier set); `Duet.VerificationGate` provides the §8.7 data layer
-  (`aggregate_status/1`, `build_block/2`, `timeout_block/1`). None
-  wired into PairRunner yet.
+  resolves §7.8 tool-profile constraints (`resolve/4`, `resolve/5`,
+  `allows?/5`, `validate_config/1`, `known_tools/0` for the §17
+  implementation-defined identifier set); `Duet.VerificationGate`
+  provides the §8.7 data layer (`aggregate_status/1`, `build_block/2`,
+  `timeout_block/1`). None wired into PairRunner yet.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.

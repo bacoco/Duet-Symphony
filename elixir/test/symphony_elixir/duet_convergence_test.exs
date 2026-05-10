@@ -78,6 +78,17 @@ defmodule SymphonyElixir.DuetConvergenceTest do
       assert Convergence.evaluate(signals) == {:not_converged, :tree_hash_mismatch}
     end
 
+    test "returns :tree_hash_mismatch when both approve on an empty tree_hash" do
+      signals = %Convergence{
+        reviewer_verdict: :approve,
+        reviewer_tree_hash: "",
+        author_verdict: :approve,
+        author_tree_hash: ""
+      }
+
+      assert Convergence.evaluate(signals) == {:not_converged, :tree_hash_mismatch}
+    end
+
     test "returns :author_not_approved when reviewer approves but author requests changes" do
       signals = %Convergence{
         reviewer_verdict: :approve,

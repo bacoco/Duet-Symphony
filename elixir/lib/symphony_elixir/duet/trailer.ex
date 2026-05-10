@@ -158,8 +158,15 @@ defmodule SymphonyElixir.Duet.Trailer do
 
   defp extract_confidence(%{"confidence" => raw}) when is_binary(raw) do
     case Float.parse(raw) do
-      {value, _rest} when value >= 0.0 and value <= 1.0 -> {:ok, value}
-      _ -> {:error, :invalid_confidence}
+      {value, rest} when value >= 0.0 and value <= 1.0 ->
+        if String.trim(rest) == "" do
+          {:ok, value}
+        else
+          {:error, :invalid_confidence}
+        end
+
+      _ ->
+        {:error, :invalid_confidence}
     end
   end
 

@@ -474,20 +474,22 @@ loop. None are wired into the orchestrator or any agent runtime yet.
   per spec). `validate_config/1` checks the structure of the map.
 - `SymphonyElixir.Duet.ToolProfile` resolves the spec §7.8
   `tool_profiles` config: `enabled?/1`, `default_profile_name/1`,
-  `resolve/4` (returns `:all` or a sorted tool list, or
-  `{:error, ...}` for unknown profile/phase/role/tool),
+  `resolve/4` / `resolve/5` (returns `:all` or a sorted tool list, or
+  `{:error, ...}` for unknown profile/phase/role/tool), including the
+  SPEC/PLAN/CODE `author` + `reviewers.default` / actor override shape,
   `allows?/5`, `validate_config/1`. The §17 implementation-defined
   tool identifier set is exposed via `known_tools/0`. Schema wiring
   for `Config.Schema.Duet.tool_profiles` is intentionally a future
   slice; this module operates on the raw config map.
 - `SymphonyElixir.Duet.VerificationGate` provides the spec §8.7
   data layer: `aggregate_status/1` (combines per-check statuses with
-  `:timeout` dominating, mixed pass/fail → `:partial`),
+  all-timeout → `:timeout`, timeout mixed with completed checks →
+  `:partial`, mixed pass/fail → `:partial`),
   `build_block/2` (renders the `---DUET-VERIFICATION---` block per
-  the §8.7 example shape), `timeout_block/1` (synthetic timeout
-  block for §8.7 step 2), and `start_marker/0` / `end_marker/0`
-  constants. CI execution / GitHub status polling is a future
-  orchestrator slice.
+  the §8.7 example shape with escaped name/summary fields),
+  `timeout_block/1` (synthetic timeout block for §8.7 step 2), and
+  `start_marker/0` / `end_marker/0` constants. CI execution / GitHub
+  status polling is a future orchestrator slice.
 - None of these slices touches an agent runtime, opens a PR, or
   emits new event kinds. They form the pure substrate that the
   upcoming orchestrator wiring slices will consume.

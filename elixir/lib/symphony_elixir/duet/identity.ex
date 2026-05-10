@@ -98,9 +98,9 @@ defmodule SymphonyElixir.Duet.Identity do
 
       [] ->
         identities = Enum.map(resolved, fn {_actor, {:ok, identity}} -> identity end)
-        unique = Enum.uniq(identities)
+        normalized_unique = identities |> Enum.map(&String.downcase/1) |> Enum.uniq()
 
-        case {identities, unique} do
+        case {identities, normalized_unique} do
           {[first | _rest], [_only_one]} -> {:error, {:shared_identity, first}}
           _ -> :ok
         end

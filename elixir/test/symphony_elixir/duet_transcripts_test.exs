@@ -113,6 +113,30 @@ defmodule SymphonyElixir.DuetTranscriptsTest do
     assert contents =~ "response body"
   end
 
+  test "write/6 redacts known credential patterns before persisting transcript" do
+    pem = """
+    -----BEGIN PRIVATE KEY-----
+    abc123
+    -----END PRIVATE KEY-----
+    """
+
+    prompt = "api_key: sk-test-secret\nAWS key AKIA1234567890ABCDEF"
+    response = "token=ghp_secret\n#{pem}"
+
+    assert {:ok, path} =
+             Transcripts.write("TASK-REDACT", "CODE", 1, "codex", prompt, response)
+
+    contents = File.read!(path)
+
+    refute contents =~ "sk-test-secret"
+    refute contents =~ "AKIA1234567890ABCDEF"
+    refute contents =~ "ghp_secret"
+    refute contents =~ "abc123"
+    assert contents =~ "[REDACTED_SECRET]"
+    assert contents =~ "[REDACTED_AWS_ACCESS_KEY]"
+    assert contents =~ "[REDACTED_PEM_PRIVATE_KEY]"
+  end
+
   test "write/6 overwrites a previous transcript at the same path" do
     assert {:ok, path} =
              Transcripts.write("TASK-OVER", "SPEC", 1, "claude", "first prompt", "first response")

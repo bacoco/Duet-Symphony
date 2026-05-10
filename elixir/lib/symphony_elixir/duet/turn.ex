@@ -79,8 +79,10 @@ defmodule SymphonyElixir.Duet.Turn do
         record_parsed_response(task_or_issue, phase, cycle, actor, trailer, issues, opts)
 
       {:error, reason} ->
-        _ = append_trailer_rejection(task_or_issue, phase, cycle, actor, reason, opts)
-        {:error, reason}
+        case append_trailer_rejection(task_or_issue, phase, cycle, actor, reason, opts) do
+          {:ok, _event} -> {:error, reason}
+          {:error, log_reason} -> {:error, {:event_log_failed, log_reason}}
+        end
     end
   end
 

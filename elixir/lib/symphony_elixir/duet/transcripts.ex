@@ -18,6 +18,10 @@ defmodule SymphonyElixir.Duet.Transcripts do
   alias SymphonyElixir.Duet.EventLog
   alias SymphonyElixir.Linear.Issue
 
+  @aws_access_key_pattern ~r/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/
+  @pem_private_key_pattern ~r/-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----/s
+  @generic_secret_pattern ~r/(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|token)\b\s*[:=]\s*["']?[^"'\s]+["']?/
+
   @type write_result :: {:ok, Path.t()} | {:error, term()}
 
   @spec root() :: Path.t()
@@ -65,7 +69,24 @@ defmodule SymphonyElixir.Duet.Transcripts do
     |> File.read()
   end
 
+  @doc """
+  Redacts known credential patterns before prompt/response text is persisted
+  to transcript audit files.
+  """
+  @spec redact(String.t()) :: String.t()
+  def redact(text) when is_binary(text) do
+    text
+    |> redact_pattern(@pem_private_key_pattern, "[REDACTED_PEM_PRIVATE_KEY]")
+    |> redact_pattern(@aws_access_key_pattern, "[REDACTED_AWS_ACCESS_KEY]")
+    |> redact_pattern(@generic_secret_pattern, "[REDACTED_SECRET]")
+  end
+
+  defp redact_pattern(text, pattern, replacement), do: Regex.replace(pattern, text, replacement)
+
   defp render(task_id, phase, cycle, actor, prompt, response) do
+    redacted_prompt = redact(prompt)
+    redacted_response = redact(response)
+
     recorded_at =
       DateTime.utc_now()
       |> DateTime.truncate(:second)
@@ -82,11 +103,11 @@ defmodule SymphonyElixir.Duet.Transcripts do
 
     ## Prompt
 
-    #{String.trim_trailing(prompt)}
+    #{String.trim_trailing(redacted_prompt)}
 
     ## Response
 
-    #{String.trim_trailing(response)}
+    #{String.trim_trailing(redacted_response)}
     """
   end
 

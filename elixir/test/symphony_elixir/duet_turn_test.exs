@@ -183,4 +183,19 @@ defmodule SymphonyElixir.DuetTurnTest do
     assert {:ok, [event]} = EventLog.read(task_id)
     assert event["reason"] == "position_invalid"
   end
+
+  test "record_response propagates event log failures while recording trailer rejection" do
+    bad_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-duet-turn-bad-root-#{System.unique_integer([:positive])}"
+      )
+
+    File.write!(bad_root, "not a directory")
+    on_exit(fn -> File.rm_rf(bad_root) end)
+    EventLog.set_root(bad_root)
+
+    assert {:error, {:event_log_failed, :enotdir}} =
+             Turn.record_response("TURN-LOG-FAIL", "SPEC", 1, "codex", "no trailer here")
+  end
 end

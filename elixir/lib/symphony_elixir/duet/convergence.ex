@@ -78,7 +78,7 @@ defmodule SymphonyElixir.Duet.Convergence do
   Evaluates the §10.2 convergence rule against a pair of signals.
 
   Returns `:converged` only when both verdicts are `:approve` *and* both
-  tree-hashes are non-nil binaries that compare equal. Otherwise returns
+  tree-hashes are non-empty binaries that compare equal. Otherwise returns
   `{:not_converged, reason}` where `reason` is one of:
 
   * `:missing_reviewer_signal` — no reviewer verdict has been recorded.
@@ -103,7 +103,8 @@ defmodule SymphonyElixir.Duet.Convergence do
     {:not_converged, :author_not_approved}
   end
 
-  def evaluate(%__MODULE__{reviewer_tree_hash: hash, author_tree_hash: hash}) when is_binary(hash) do
+  def evaluate(%__MODULE__{reviewer_tree_hash: hash, author_tree_hash: hash})
+      when is_binary(hash) and byte_size(hash) > 0 do
     :converged
   end
 
