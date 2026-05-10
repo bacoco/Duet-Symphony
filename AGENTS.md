@@ -47,6 +47,66 @@ as the artifact and convergence substrate.
 - The first operator routing menu slice is in place: the observability
   dashboard and `/api/v1/duet/routing` can select the runtime Duet profile
   from the configured profiles, and `PairRunner` consumes that selection.
+  A stale runtime selection (profile removed from `WORKFLOW.md` after
+  selection) is auto-cleared with a warning log on the next dispatch.
+- The first trailer parser slice is in place: `SymphonyElixir.Duet.Trailer`
+  decodes the spec §10.1 response trailer, picks the last syntactically
+  valid block when several are present, enforces the 50-line position
+  limit (§10.1.2), and surfaces semantic issues (`:low_confidence_approve`,
+  `:synthesized_no_details`, `{:approve_with_unresolved, original}`) so the
+  orchestrator can re-prompt or annotate per spec §10.1.1. Not yet wired
+  into PairRunner.
+- The first turn recorder slice is in place: `SymphonyElixir.Duet.Turn`
+  joins `Duet.Trailer` and `Duet.EventLog`. `record_request/5` emits
+  `turn_request`; `record_response/6` parses the trailer and emits
+  `turn_response` (success), `trailer_rejected` (missing/malformed/
+  position_invalid), or `low_confidence_approve` (warning) per spec
+  §13.1, while binding the tree-hash to the orchestrator-supplied
+  value rather than any agent-claimed hash. Not yet wired into
+  PairRunner.
+- The first phase-prompt builder slice is in place:
+  `SymphonyElixir.Duet.PhasePrompt.build/1` produces a deterministic
+  Author/Reviewer prompt for a given phase + cycle + role + routing
+  profile, embeds the §10.1 trailer schema verbatim, and surfaces the
+  §10.1.2 position rule. Implementation-defined per §17. Operator
+  description input is now bounded at the spec §14 default of 50 000
+  chars (configurable per-call via `:max_description_chars`).
+- The pair-loop scaffolding slices are in place:
+  `Duet.TurnDriver` is the `@behaviour` future Codex/Claude drivers
+  implement (`drive_turn(prompt, opts)`); `Duet.TurnDrivers.Mock`
+  provides a stub for tests. `Duet.Branches` computes the §6.1 / §9.1
+  branch names and validates §5.2 task IDs.
+  `Duet.PhaseFreezeMessage.build/1` renders the §8.4 freeze text and
+  `summary_word_target/2` returns the adaptive word budget per §8.4.
+  `Duet.Transcripts.write/6` persists the §13.2 per-turn prompt+response
+  to `<log_dir>/tasks/<task_id>/transcripts/<phase>-<cycle>-<actor>.md`.
+  None of these touches an agent runtime; PairRunner does not yet
+  consume them.
+- The convergence-engine pure helpers are in place:
+  `Duet.Convergence` implements the §9.3 split-signal mapping and the
+  §10.2 convergence rule (both APPROVE on same tree-hash);
+  `Duet.CycleCap` covers the §10.3 counter and §10.4 tie-breakers
+  (SPEC/PLAN forced freeze, CODE escalate/forced/fail policies, plus
+  operator override resolution); `Duet.PathologicalDisagreement.detect/1`
+  flags three consecutive cycles with equal `unresolved` after
+  normalization (§10.5); `Duet.Identity` resolves per-actor GitHub
+  identities from app env / `DUET_*_GITHUB_IDENTITY` env vars and
+  validates the §9.3 distinct-identity requirement (`Config.Schema`
+  wiring is a future slice); `Duet.PhaseSummary` provides the v1 §8.4
+  truncation strategy (`word_count/1`, `diff_line_count/1`,
+  `summarize/2`). None wired into PairRunner yet.
+- The phase-pipeline + v0.4 opt-in pure helpers are in place:
+  `Duet.Metrics` derives §13.5 convergence metrics from the event log
+  (`for_phase/2`, `for_task/1`, `forced_rate/2`); `Duet.PhaseTransition`
+  encodes §8.2 ordering and §8.3 freeze actions (including CODE held
+  open vs SPEC/PLAN merged); `Duet.HumanCheckpoint` reads the §8.6
+  config (`mode_for_phase/2`, `resolve_decision/2`, REVIEW
+  `:request_changes` returns to CODE per spec); `Duet.ToolProfile`
+  resolves §7.8 tool-profile constraints (`resolve/4`, `allows?/5`,
+  `validate_config/1`, `known_tools/0` for the §17 implementation-defined
+  identifier set); `Duet.VerificationGate` provides the §8.7 data layer
+  (`aggregate_status/1`, `build_block/2`, `timeout_block/1`). None
+  wired into PairRunner yet.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -89,11 +149,63 @@ Completed first slice:
    `TaskState.recover/2` returns recovered state even when routing diverges.
 8. Add the first operator routing menu/API so a runtime can choose the active
    Duet profile before future tasks dispatch.
+9. Auto-clear stale operator selections when the named profile is removed
+   from `WORKFLOW.md`, falling back to the configured default.
+10. Add the first Duet trailer parser (`SymphonyElixir.Duet.Trailer`) covering
+    §10.1 syntax, §10.1.2 position rule, and §10.1.1 semantic checks, with no
+    orchestrator wiring yet.
+11. Add the first Duet turn recorder (`SymphonyElixir.Duet.Turn`) joining
+    `Duet.Trailer` and `Duet.EventLog`. Emits `turn_request`,
+    `turn_response`, `trailer_rejected`, and `low_confidence_approve` events
+    per spec §13.1 with orchestrator-bound tree-hash, no orchestrator wiring
+    yet.
+12. Add the first Duet phase-prompt builder
+    (`SymphonyElixir.Duet.PhasePrompt`) producing Author/Reviewer prompts
+    that embed the spec §10.1 trailer template and the §10.1.2 position
+    rule; pure, deterministic, implementation-defined per §17, no wiring
+    yet.
+13. Add `Duet.TurnDriver` behaviour + `Duet.TurnDrivers.Mock` so future
+    Codex/Claude drivers plug in behind a stable contract.
+14. Add `Duet.Branches` pure helpers for §6.1 / §9.1 branch names and §5.2
+    task_id validation. Phase branches only cover SPEC/PLAN/CODE; REVIEW
+    shares the CODE PR per §8.1.
+15. Add `Duet.PhaseFreezeMessage` to render the spec §8.4 phase-freeze
+    message, plus `summary_word_target/2` for the §8.4 adaptive summary
+    budget.
+16. Add `Duet.Transcripts.write/6` to persist spec §13.2 per-turn
+    transcripts under `<log_dir>/tasks/<task_id>/transcripts/`. Root
+    delegates to `Duet.EventLog.root/0` so `--logs-root` relocates them.
+17. Bound `issue_description` rendering in `Duet.PhasePrompt` at the
+    spec §14 default of 50 000 chars (per-call override via
+    `:max_description_chars`), with a `[truncated to <max> chars per
+    spec §14]` marker.
+18. Add `Duet.Convergence` (§9.3 + §10.2 split-signal evaluation),
+    `Duet.CycleCap` (§10.3 + §10.4 cycle counter and tie-breaker),
+    `Duet.PathologicalDisagreement` (§10.5 detector),
+    `Duet.Identity` (§9.3 distinct GitHub identity per actor with env
+    var + app env fallback), and `Duet.PhaseSummary` (§8.4 v1
+    truncation summary helpers). All pure, no orchestrator wiring yet.
+19. Add `Duet.Metrics` (§13.5 convergence metrics derived from the event
+    log), `Duet.PhaseTransition` (§8.2 + §8.3 phase pipeline state
+    machine + freeze actions), `Duet.HumanCheckpoint` (§8.6 config
+    resolver + decision mapping), `Duet.ToolProfile` (§7.8 tool-profile
+    resolver + validator), and `Duet.VerificationGate` (§8.7 block
+    builder + status aggregator). All pure, no orchestrator wiring yet;
+    schema wiring for `tool_profiles` and `verification_gate` config
+    blocks is a deliberate follow-up.
 
 Next slice:
 
 1. Use Codex App Server for the Codex half of the real pair loop while keeping
-   the existing `AgentRunner` compatibility path intact.
+   the existing `AgentRunner` compatibility path intact. Implement
+   `Duet.TurnDrivers.CodexAppServer` against the existing
+   `SymphonyElixir.Codex.AppServer`. The pair-loop driver should: build a
+   prompt with `Duet.PhasePrompt.build/1`, record it via
+   `Duet.Turn.record_request/5`, dispatch it via the chosen `TurnDriver`
+   implementation, write `Duet.Transcripts.write/6` for audit, capture the
+   response, feed it into `Duet.Turn.record_response/6`, and use the
+   convergence/cycle-cap/pathological helpers to decide when to converge,
+   escalate, or fail per spec §10.
 
 Subsequent slices:
 
@@ -102,9 +214,7 @@ Subsequent slices:
 2. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
    Claude half; do not rely on fragile TTY automation unless no better option
    exists.
-3. Parse only the final `---DUET-TRAILER---` block from each agent response and
-   persist structured events to `.duet/logs/tasks/<task_id>/events.jsonl`.
-4. Add optional SuperPower artifact support under `docs/superpowers/` for
+3. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 
 ## Known Design Constraints

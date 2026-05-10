@@ -35,4 +35,16 @@ defmodule SymphonyElixir.DuetRoutingSelectionTest do
     assert {:error, {:unknown_profile, "missing"}} = RoutingSelection.select(Config.settings!().duet, "missing")
     assert RoutingSelection.selected_profile_name(Config.settings!().duet) == "duet_balanced"
   end
+
+  test "selected_profile_name reverts to default when stored profile no longer exists" do
+    settings = Config.settings!().duet
+
+    Application.put_env(:symphony_elixir, :duet_selected_routing_profile, "vanished_profile")
+
+    assert RoutingSelection.selected_profile_name(settings) == "duet_balanced"
+    assert Application.get_env(:symphony_elixir, :duet_selected_routing_profile) == nil
+
+    assert {:ok, profile} = RoutingSelection.resolve(settings)
+    assert profile.name == "duet_balanced"
+  end
 end

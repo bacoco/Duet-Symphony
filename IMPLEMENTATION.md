@@ -274,7 +274,223 @@ The first operator routing menu slice is complete.
 - This slice is runtime-global rather than per-task. A future dispatch gate
   must persist per-task overrides with `routing_override_applied` when
   `require_selection_before_dispatch` is enforced.
+- A stale operator selection (profile removed from `WORKFLOW.md` after
+  selection) is detected on the next `selected_profile_name/1` call,
+  cleared from runtime state with a warning log, and falls back to the
+  configured `default_profile`.
 - No external Claude/Codex calls are introduced in this slice.
+
+## Duet Trailer Parser Status
+
+The first Duet trailer parsing slice is complete.
+
+- `SymphonyElixir.Duet.Trailer.parse/1` decodes the structured response
+  trailer defined in spec §10.1 into a `%Trailer{}` struct with
+  `verdict`, `confidence`, `summary`, and `unresolved` fields.
+- When several `---DUET-TRAILER---` blocks appear in a response, only the
+  last syntactically valid block is considered. A malformed final block
+  followed by an earlier valid one falls back to the earlier valid block.
+- The trailer must start within the final 50 lines of the response;
+  otherwise `parse/1` returns `{:error, :position_invalid}` so the
+  orchestrator can emit a `trailer_rejected` event and re-prompt.
+- Semantic checks from §10.1.1 are surfaced as a list of issues alongside
+  the parsed trailer:
+  - `:low_confidence_approve` for APPROVE with `confidence < 0.3`.
+  - `:synthesized_no_details` when REQUEST_CHANGES had an empty
+    `unresolved` list (the field is rewritten to `["no_details_provided"]`).
+  - `{:approve_with_unresolved, original}` when APPROVE arrived with a
+    non-empty unresolved list, preserving the original list for the
+    orchestrator's re-prompt/REQUEST_CHANGES fallback path.
+- `tree_hash` is intentionally NOT part of the schema: per §10.1.2 the
+  orchestrator binds the trailer to the commit tree-hash observed at
+  dispatch time, never to any agent-supplied hash.
+- No orchestrator wiring or new event kinds are introduced in this slice;
+  consumption of the parsed trailer comes with the Codex pair-loop slice.
+
+## Duet Turn Recorder Status
+
+The first Duet turn recorder slice is complete.
+
+- `SymphonyElixir.Duet.Turn.record_request/5` appends a `turn_request`
+  event with phase, cycle, actor, and the orchestrator-supplied
+  tree-hash and PR number.
+- `SymphonyElixir.Duet.Turn.record_response/6` parses the agent
+  response via `Duet.Trailer.parse/1`. On success it appends a
+  `turn_response` event capturing the verdict, confidence, summary,
+  unresolved list, tree-hash, and PR number, and returns
+  `{:ok, %Turn{}, [issue]}` so callers can re-prompt or annotate per
+  spec §10.1.1.
+- When the trailer is missing, malformed, or placed earlier than the
+  last 50 lines (§10.1.2), `record_response/6` appends a
+  `trailer_rejected` event with the rejection reason and returns
+  `{:error, reason}` to the caller.
+- `:low_confidence_approve` issues are mirrored into a dedicated event
+  alongside the `turn_response`, matching the §10.1.1 warning channel.
+- The tree-hash is bound by the caller, never trusted from agent
+  output (§10.1.2).
+- Still no orchestrator wiring; PairRunner does not yet consume
+  `Duet.Turn`. The Codex pair-loop slice will plug it in as the
+  per-turn convergence step.
+
+## Duet Phase Prompt Builder Status
+
+The first Duet phase-prompt builder slice is complete.
+
+- `SymphonyElixir.Duet.PhasePrompt.build/1` constructs a deterministic
+  pair-loop prompt for an Author or Reviewer given a typed context
+  (task identity, phase, cycle, role, actor, counterpart, active
+  routing profile, prior frozen-phase summaries, current artifact,
+  prior reviewer feedback).
+- The output embeds the spec §10.1 trailer template verbatim and
+  surfaces the §10.1.2 "last 50 lines" position rule directly in the
+  instruction block, so a compliant agent has the schema in front of it
+  every turn.
+- Role-specific phrasing covers Author/Reviewer for SPEC, PLAN, CODE,
+  plus REVIEW's split-signal constraints (`coder_ack` cannot
+  GitHub-APPROVE its own PR per §9.3; `review_reviewer` performs the
+  fresh-context independent review).
+- The prompt header records `task_id`, `cycle`, `actor`, `role`,
+  `profile`, and `mode`, so an audit reader can correlate any captured
+  prompt with the matching `agent_routing_selected` and
+  `turn_request`/`turn_response` events.
+- The builder is implementation-defined per §17. No I/O, no event
+  emission, no orchestrator wiring; the Codex pair-loop slice will be
+  the first consumer.
+
+## Pair-Loop Scaffolding Status
+
+The TurnDriver, Branches, PhaseFreezeMessage, Transcripts, and
+description-length-bound slices are complete. They prepare the seams
+needed by the Codex App Server pair loop without touching any agent
+runtime yet.
+
+- `SymphonyElixir.Duet.TurnDriver` is a `@behaviour` with one callback
+  `drive_turn(prompt, opts) :: {:ok, response} | {:error, term()}`.
+  `SymphonyElixir.Duet.TurnDrivers.Mock` is the in-process implementation
+  used by tests and stubs: it returns `opts[:response]` if a binary,
+  otherwise `opts[:error]`, otherwise `{:error, :no_canned_response}`.
+  Codex/Claude implementations will be added behind this same behaviour.
+- `SymphonyElixir.Duet.Branches` exposes pure helpers for the spec §6.1
+  / §9.1 branch topology and the §5.2 `task_id` regex:
+  `base_branch/1`, `phase_branch/2` (only `:spec`/`:plan`/`:code` —
+  REVIEW shares the CODE PR per §8.1), `valid_task_id?/1`,
+  `validate_task_id/1`, `base_prefix/0`, `phase_prefix/0`. Prefixes are
+  hardcoded to spec defaults (`duet-base` / `duet-phase`); reading them
+  from `WORKFLOW.md` is a future slice.
+- `SymphonyElixir.Duet.PhaseFreezeMessage.build/1` renders the spec §8.4
+  text exactly, with the three blocks (header / summary / tail) joined
+  by blank lines. Terminal REVIEW freezes omit the
+  `Next phase:` / `Your role next phase:` lines per spec semantics.
+  `summary_word_target/2` returns the §8.4 adaptive target:
+  `min(1500, words × 0.5)` for SPEC/PLAN, `min(3000, diff_lines × 2)`
+  for CODE, both clamped to a 300-word floor. The summary text itself
+  is generated upstream by the orchestrator and passed in.
+- `SymphonyElixir.Duet.Transcripts.write/6` writes spec §13.2 per-turn
+  transcripts to `<log_dir>/tasks/<task_id>/transcripts/<phase>-<cycle>-<actor>.md`,
+  delegating root resolution to `Duet.EventLog.root/0` so `--logs-root`
+  relocates them automatically. Re-prompts within the same
+  `(phase, cycle, actor)` triple overwrite the file; multi-attempt
+  audit lives in the event log.
+- `Duet.PhasePrompt` now bounds `issue_description` at a default
+  50 000 chars (configurable per-call via `:max_description_chars`)
+  and appends a `[truncated to <max> chars per spec §14]` marker when
+  truncation occurs. This enforces the §14 "operator input MUST be
+  bounded in length" requirement at the prompt-rendering layer.
+- None of the five slices touches an agent runtime, opens a PR, or
+  emits new event kinds. They form the seam consumed by the upcoming
+  Codex App Server pair-loop driver slice.
+
+## Convergence Engine Status
+
+The convergence-engine pure helpers are complete. Together they cover
+spec §9.3, §10.2, §10.3, §10.4, and §10.5 logic without any
+orchestrator wiring or GitHub I/O.
+
+- `SymphonyElixir.Duet.Convergence.from_github_review_state/1` maps the
+  GitHub PR review state strings (`"APPROVED"` / `"CHANGES_REQUESTED"`)
+  to verdict atoms; everything else returns `:other`.
+- `Convergence.evaluate/1` applies spec §10.2: returns `:converged` iff
+  both reviewer and author APPROVE on the same non-nil tree-hash;
+  otherwise `{:not_converged, reason}` with explicit reasons
+  (`:reviewer_not_approved`, `:author_not_approved`,
+  `:tree_hash_mismatch`, `:missing_reviewer_signal`,
+  `:missing_author_signal`).
+- `SymphonyElixir.Duet.CycleCap.at_cap?/2` is the §10.3 counter check;
+  `default_max_cycles/0` returns 5.
+- `CycleCap.tie_breaker/3` implements §10.4.1 (SPEC/PLAN: forced freeze
+  on the Reviewer's last-authored revision, fallback to Author's last)
+  and §10.4.2 (CODE: respect `code_phase_cap_policy` —
+  `:escalate` / `:forced` / `:fail`).
+- `CycleCap.resolve_operator_override/2` resolves the §10.4.2 operator
+  decisions (`:approve_author`, `:approve_reviewer`, `:fail`) to either
+  a freeze with `mode = operator_override_*` or a fail tuple.
+- `SymphonyElixir.Duet.PathologicalDisagreement.detect/1` flags
+  three consecutive cycles whose `unresolved` lists are equal after
+  normalization (trim, whitespace collapse, lowercase, drop empty,
+  uniq, sort) per §10.5.
+- `SymphonyElixir.Duet.Identity` resolves per-actor GitHub identities
+  (claude / codex) from app-env overrides or `DUET_*_GITHUB_IDENTITY`
+  environment variables, and validates the §9.3 distinct-identity
+  requirement. The `WORKFLOW.md` `duet.agents.<actor>.github_identity`
+  schema wiring is intentionally deferred to a future slice; this
+  module stands alone today.
+- `SymphonyElixir.Duet.PhaseSummary` provides the v1 fixed-cap
+  truncation strategy permitted by §8.4: `word_count/1`,
+  `diff_line_count/1`, and `summarize/2` (first N words plus a
+  `[summary truncated to first N words per spec §8.4 v1 strategy]`
+  marker). It feeds `Duet.PhaseFreezeMessage.summary_word_target/2`.
+- No agent runtime, GitHub call, or new event kind is introduced in
+  these slices. They are pure helpers consumed by the pair-loop slice.
+
+## Phase Pipeline + v0.4 Opt-In Helpers Status
+
+Five further pure helpers are complete, covering the §8.2/§8.3 phase
+pipeline state machine and the v0.4 opt-in features (§8.6 / §7.8 /
+§8.7) that the spec marks as additive on top of the canonical pair
+loop. None are wired into the orchestrator or any agent runtime yet.
+
+- `SymphonyElixir.Duet.Metrics.for_phase/2` and `for_task/1` derive
+  the spec §13.5 convergence metrics from a Duet event log:
+  `cycles_to_converge`, `convergence_mode`, `confidence_delta`,
+  `mean_cycle_duration_ms`, `verification_pass_rate`, plus per-task
+  `total_cycles`, `convergence_velocity`, `escalation_count`,
+  `degraded_phases`. `forced_rate/2` is the rolling-window helper.
+  Pure event-log fold; no I/O.
+- `SymphonyElixir.Duet.PhaseTransition` encodes spec §8.2 ordering
+  and §8.3 freeze semantics: `next_phase/1`, `terminal?/1`,
+  `freeze_merges_phase_pr?/1`, `freeze_actions/1`,
+  `has_phase_branch?/1`, `validate_transition/2`. The
+  `freeze_actions/1` list is the spec-defined sequence of side
+  effects per phase (e.g. CODE returns
+  `[:hold_open_for_review, :record_code_tree_hash, :emit_phase_freeze_message]`)
+  for the orchestrator to wire later.
+- `SymphonyElixir.Duet.HumanCheckpoint` reads the existing
+  `Config.Schema.Duet.human_checkpoints` map field and returns
+  `mode_for_phase/2` (`:blocking` / `:advisory` / `:disabled`),
+  `blocking?/2`, `timeout_ms/1`, `blocking_phases/1`, plus
+  `resolve_decision/2` mapping operator decisions
+  (`:approve` / `:request_changes` / `:fail`) to the §8.6 freeze-flow
+  actions (REVIEW `:request_changes` correctly returns to CODE
+  per spec). `validate_config/1` checks the structure of the map.
+- `SymphonyElixir.Duet.ToolProfile` resolves the spec §7.8
+  `tool_profiles` config: `enabled?/1`, `default_profile_name/1`,
+  `resolve/4` (returns `:all` or a sorted tool list, or
+  `{:error, ...}` for unknown profile/phase/role/tool),
+  `allows?/5`, `validate_config/1`. The §17 implementation-defined
+  tool identifier set is exposed via `known_tools/0`. Schema wiring
+  for `Config.Schema.Duet.tool_profiles` is intentionally a future
+  slice; this module operates on the raw config map.
+- `SymphonyElixir.Duet.VerificationGate` provides the spec §8.7
+  data layer: `aggregate_status/1` (combines per-check statuses with
+  `:timeout` dominating, mixed pass/fail → `:partial`),
+  `build_block/2` (renders the `---DUET-VERIFICATION---` block per
+  the §8.7 example shape), `timeout_block/1` (synthetic timeout
+  block for §8.7 step 2), and `start_marker/0` / `end_marker/0`
+  constants. CI execution / GitHub status polling is a future
+  orchestrator slice.
+- None of these slices touches an agent runtime, opens a PR, or
+  emits new event kinds. They form the pure substrate that the
+  upcoming orchestrator wiring slices will consume.
 
 ## Local Modifications Inside elixir/
 
@@ -298,7 +514,7 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir_web/router.ex` | routing menu slice | routes `/api/v1/duet/routing` before issue detail routes |
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
 | `priv/static/dashboard.css` | routing menu slice | styles the Duet routing select, metadata row, and phase table |
-| `test/support/test_support.exs` | routing menu slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures; clears runtime routing profile selection between tests |
+| `test/support/test_support.exs` | identity slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures; clears runtime routing profile selection and Duet GitHub identity overrides between tests |
 | `test/symphony_elixir/extensions_test.exs` | routing menu slice | covers routing API payload, profile selection, and dashboard form behavior |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
 | `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows near lines 562 and 604 after the same upstream timing flake failed on pinned GitHub Actions run `25628886607` |
@@ -312,10 +528,45 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/duet/routing.ex`
 - `lib/symphony_elixir/duet/routing_selection.ex`
 - `lib/symphony_elixir/duet/task_state.ex`
+- `lib/symphony_elixir/duet/trailer.ex`
+- `lib/symphony_elixir/duet/turn.ex`
+- `lib/symphony_elixir/duet/turn_driver.ex`
+- `lib/symphony_elixir/duet/turn_drivers/mock.ex`
+- `lib/symphony_elixir/duet/branches.ex`
+- `lib/symphony_elixir/duet/phase_prompt.ex`
+- `lib/symphony_elixir/duet/phase_freeze_message.ex`
+- `lib/symphony_elixir/duet/transcripts.ex`
+- `lib/symphony_elixir/duet/convergence.ex`
+- `lib/symphony_elixir/duet/cycle_cap.ex`
+- `lib/symphony_elixir/duet/pathological_disagreement.ex`
+- `lib/symphony_elixir/duet/identity.ex`
+- `lib/symphony_elixir/duet/phase_summary.ex`
+- `lib/symphony_elixir/duet/metrics.ex`
+- `lib/symphony_elixir/duet/phase_transition.ex`
+- `lib/symphony_elixir/duet/human_checkpoint.ex`
+- `lib/symphony_elixir/duet/tool_profile.ex`
+- `lib/symphony_elixir/duet/verification_gate.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/duet_event_log_test.exs`
 - `test/symphony_elixir/duet_routing_selection_test.exs`
 - `test/symphony_elixir/duet_task_state_test.exs`
+- `test/symphony_elixir/duet_trailer_test.exs`
+- `test/symphony_elixir/duet_turn_test.exs`
+- `test/symphony_elixir/duet_turn_driver_mock_test.exs`
+- `test/symphony_elixir/duet_branches_test.exs`
+- `test/symphony_elixir/duet_phase_prompt_test.exs`
+- `test/symphony_elixir/duet_phase_freeze_message_test.exs`
+- `test/symphony_elixir/duet_transcripts_test.exs`
+- `test/symphony_elixir/duet_convergence_test.exs`
+- `test/symphony_elixir/duet_cycle_cap_test.exs`
+- `test/symphony_elixir/duet_pathological_disagreement_test.exs`
+- `test/symphony_elixir/duet_identity_test.exs`
+- `test/symphony_elixir/duet_phase_summary_test.exs`
+- `test/symphony_elixir/duet_metrics_test.exs`
+- `test/symphony_elixir/duet_phase_transition_test.exs`
+- `test/symphony_elixir/duet_human_checkpoint_test.exs`
+- `test/symphony_elixir/duet_tool_profile_test.exs`
+- `test/symphony_elixir/duet_verification_gate_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`
 

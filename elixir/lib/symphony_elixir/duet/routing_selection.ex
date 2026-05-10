@@ -4,7 +4,14 @@ defmodule SymphonyElixir.Duet.RoutingSelection do
 
   The repository-owned `WORKFLOW.md` remains the source of available profiles.
   This module stores only the operator's current runtime selection.
+
+  When `WORKFLOW.md` is reloaded and the previously-selected profile no longer
+  exists, the stale runtime selection is cleared automatically so dispatch
+  falls back to the configured default profile rather than crashing on every
+  retry.
   """
+
+  require Logger
 
   alias SymphonyElixir.Duet.Routing
 
@@ -19,7 +26,26 @@ defmodule SymphonyElixir.Duet.RoutingSelection do
   end
 
   def selected_profile_name(agent_routing) when is_map(agent_routing) do
-    Application.get_env(:symphony_elixir, @env_key) || default_profile_name(agent_routing)
+    case Application.get_env(:symphony_elixir, @env_key) do
+      nil ->
+        default_profile_name(agent_routing)
+
+      selected when is_binary(selected) ->
+        if profile_known?(agent_routing, selected) do
+          selected
+        else
+          Logger.warning("Operator-selected Duet profile #{inspect(selected)} no longer present in agent_routing.profiles; reverting to default")
+          Application.delete_env(:symphony_elixir, @env_key)
+          default_profile_name(agent_routing)
+        end
+    end
+  end
+
+  defp profile_known?(agent_routing, name) when is_binary(name) do
+    agent_routing
+    |> normalize_keys()
+    |> Map.get("profiles", %{})
+    |> Map.has_key?(name)
   end
 
   @spec resolve(map() | struct()) :: {:ok, Routing.profile()} | {:error, term()}
