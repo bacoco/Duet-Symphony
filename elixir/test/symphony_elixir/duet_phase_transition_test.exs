@@ -96,9 +96,11 @@ defmodule SymphonyElixir.DuetPhaseTransitionTest do
              ]
     end
 
-    test "REVIEW freeze merges the CODE PR, deletes the CODE sub-branch, and emits both messages" do
+    test "REVIEW freeze marks ready, merges CODE PR, merges base, deletes sub-branch, and emits both messages" do
       assert PhaseTransition.freeze_actions("REVIEW") == [
+               :mark_code_pr_ready,
                :merge_code_pr_into_base,
+               :merge_base_branch,
                :delete_code_sub_branch,
                :emit_phase_freeze_message,
                :emit_task_completed

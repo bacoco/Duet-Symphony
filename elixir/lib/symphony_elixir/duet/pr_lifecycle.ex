@@ -22,6 +22,7 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
   """
 
   alias SymphonyElixir.Duet.Branches
+  alias SymphonyElixir.Duet.BranchHarness
   alias SymphonyElixir.Duet.EventLog
   alias SymphonyElixir.Duet.GhCli
   alias SymphonyElixir.Duet.PhaseTransition
@@ -124,23 +125,29 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
   Executes the freeze actions for a phase per
   `PhaseTransition.freeze_actions/1`.
 
-  Each action is dispatched to the appropriate GhCli call or recorded
-  as an event for actions that belong to other subsystems (branch
-  harness). Records a `"freeze_action_executed"` event for each action.
+  Each action is dispatched to the appropriate GhCli or BranchHarness
+  call. Records a `"freeze_action_executed"` event for each action.
 
-  Required opts: `:cwd`, `:task_id`. Optional: `:runner`.
+  GhCli actions (merge PR, mark ready) require a non-nil `pr_number`.
+  When `pr_number` is nil, those actions are skipped. BranchHarness
+  actions (delete branch, merge base) use `:task_id` and `:cwd` from
+  opts and do not require a PR number.
+
+  Required opts: `:cwd`, `:task_id`.
+  Optional: `:runner` (GhCli), `:branch_runner` (BranchHarness).
   """
   @spec execute_freeze_actions(
           String.t(),
-          pos_integer(),
+          pos_integer() | nil,
           keyword()
         ) :: :ok | {:error, term()}
   def execute_freeze_actions(phase, pr_number, opts \\ []) do
     actions = PhaseTransition.freeze_actions(phase)
     task_id = Keyword.fetch!(opts, :task_id)
+    action_opts = Keyword.put(opts, :phase, phase)
 
     Enum.reduce_while(actions, :ok, fn action, :ok ->
-      with :ok <- execute_single_action(action, pr_number, opts),
+      with :ok <- execute_single_action(action, pr_number, action_opts),
            :ok <-
              record_event(task_id, "freeze_action_executed", %{
                phase: phase,
@@ -203,6 +210,10 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
   defp verdict_to_event(:approve), do: "APPROVE"
   defp verdict_to_event(:request_changes), do: "REQUEST_CHANGES"
 
+  # -- GhCli actions (require non-nil pr_number) --
+
+  defp execute_single_action(:merge_phase_pr_into_base, nil, _opts), do: :ok
+
   defp execute_single_action(:merge_phase_pr_into_base, pr_number, opts) do
     gh_opts =
       [number: pr_number, cwd: opts[:cwd]]
@@ -210,6 +221,8 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
 
     GhCli.merge_pr(gh_opts)
   end
+
+  defp execute_single_action(:merge_code_pr_into_base, nil, _opts), do: :ok
 
   defp execute_single_action(:merge_code_pr_into_base, pr_number, opts) do
     gh_opts =
@@ -219,10 +232,7 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
     GhCli.merge_pr(gh_opts)
   end
 
-  defp execute_single_action(:hold_open_for_review, _pr_number, _opts) do
-    # CODE freeze holds the PR open — no GhCli action needed.
-    :ok
-  end
+  defp execute_single_action(:mark_code_pr_ready, nil, _opts), do: :ok
 
   defp execute_single_action(:mark_code_pr_ready, pr_number, opts) do
     gh_opts =
@@ -232,34 +242,41 @@ defmodule SymphonyElixir.Duet.PRLifecycle do
     GhCli.mark_ready(gh_opts)
   end
 
-  defp execute_single_action(:delete_phase_sub_branch, _pr_number, _opts) do
-    # Branch deletion is a BranchHarness concern; record only.
-    :ok
+  # -- BranchHarness actions (use task_id + phase from opts) --
+
+  defp execute_single_action(:delete_phase_sub_branch, _pr_number, opts) do
+    task_id = Keyword.fetch!(opts, :task_id)
+    phase = Keyword.fetch!(opts, :phase)
+    BranchHarness.cleanup_phase_branch(task_id, phase, branch_harness_opts(opts))
   end
 
-  defp execute_single_action(:delete_code_sub_branch, _pr_number, _opts) do
-    # Branch deletion is a BranchHarness concern; record only.
-    :ok
+  defp execute_single_action(:delete_code_sub_branch, _pr_number, opts) do
+    task_id = Keyword.fetch!(opts, :task_id)
+    BranchHarness.cleanup_phase_branch(task_id, "CODE", branch_harness_opts(opts))
   end
 
-  defp execute_single_action(:emit_phase_freeze_message, _pr_number, _opts) do
-    # Phase-freeze message emission is an orchestrator concern.
-    :ok
+  defp execute_single_action(:merge_base_branch, _pr_number, opts) do
+    task_id = Keyword.fetch!(opts, :task_id)
+    BranchHarness.merge_base_into_main(task_id, branch_harness_opts(opts))
   end
 
-  defp execute_single_action(:emit_task_completed, _pr_number, _opts) do
-    # Task-completed emission is an orchestrator concern.
-    :ok
-  end
+  # -- No-op actions --
 
-  defp execute_single_action(:record_code_tree_hash, _pr_number, _opts) do
-    # Tree-hash recording is deferred to BranchHarness.
-    :ok
-  end
+  defp execute_single_action(:hold_open_for_review, _pr_number, _opts), do: :ok
+  defp execute_single_action(:emit_phase_freeze_message, _pr_number, _opts), do: :ok
+  defp execute_single_action(:emit_task_completed, _pr_number, _opts), do: :ok
+  defp execute_single_action(:record_code_tree_hash, _pr_number, _opts), do: :ok
 
-  defp execute_single_action(:merge_base_branch, _pr_number, _opts) do
-    # Delegates to BranchHarness; just record event for now.
-    :ok
+  defp branch_harness_opts(opts) do
+    bh_opts = [cwd: Keyword.fetch!(opts, :cwd)]
+
+    case Keyword.get(opts, :branch_runner) do
+      runner when is_atom(runner) and not is_nil(runner) ->
+        Keyword.put(bh_opts, :runner, runner)
+
+      _ ->
+        bh_opts
+    end
   end
 
   defp record_event(task_id, kind, attrs) do

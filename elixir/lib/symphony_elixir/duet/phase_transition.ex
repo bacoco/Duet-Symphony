@@ -42,7 +42,9 @@ defmodule SymphonyElixir.Duet.PhaseTransition do
   @type freeze_action ::
           :merge_phase_pr_into_base
           | :hold_open_for_review
+          | :mark_code_pr_ready
           | :merge_code_pr_into_base
+          | :merge_base_branch
           | :delete_phase_sub_branch
           | :delete_code_sub_branch
           | :emit_phase_freeze_message
@@ -101,7 +103,14 @@ defmodule SymphonyElixir.Duet.PhaseTransition do
     do: [:hold_open_for_review, :record_code_tree_hash, :emit_phase_freeze_message]
 
   def freeze_actions("REVIEW"),
-    do: [:merge_code_pr_into_base, :delete_code_sub_branch, :emit_phase_freeze_message, :emit_task_completed]
+    do: [
+      :mark_code_pr_ready,
+      :merge_code_pr_into_base,
+      :merge_base_branch,
+      :delete_code_sub_branch,
+      :emit_phase_freeze_message,
+      :emit_task_completed
+    ]
 
   def freeze_actions(_other), do: []
 

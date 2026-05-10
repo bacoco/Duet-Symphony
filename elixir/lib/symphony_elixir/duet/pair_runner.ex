@@ -7,15 +7,20 @@ defmodule SymphonyElixir.Duet.PairRunner do
   state; Symphony's existing active-state continuation retry then dispatches
   the task again and the runner resumes from the append-only event log.
 
-  The implementation intentionally keeps GitHub branch / PR side effects
-  outside this module for now. It records the normative Duet machine state
-  (`phase_started`, `turn_request`, `turn_response`, `phase_frozen`,
-  `task_completed`, and gate events), while future slices attach real PR
-  operations at the freeze-action boundaries.
+  ## Side effects
+
+  When `side_effects: true` is passed in opts, the runner orchestrates
+  real Git branch operations (via `BranchHarness`) and GitHub PR
+  operations (via `PRLifecycle`) at phase boundaries. Without this opt,
+  only event-log state is recorded.
+
+  Injectable runners: `:branch_runner` (for `BranchHarness`),
+  `:gh_runner` (for `PRLifecycle` / `GhCli`).
   """
 
   alias SymphonyElixir.Duet.{
     AwaitingOperator,
+    BranchHarness,
     Convergence,
     ConvergenceOrchestrator,
     EventLog,
@@ -24,6 +29,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
     PhasePrompt,
     PhaseTransition,
     PRConflict,
+    PRLifecycle,
     Routing,
     RoutingSelection,
     SuperPower,
@@ -55,7 +61,10 @@ defmodule SymphonyElixir.Duet.PairRunner do
          :ok <- ensure_initial_state_events(issue, profile) do
       warn_if_identity_invalid()
       ctx = context(settings, workspace, issue, update_recipient, opts, worker_host, profile)
-      run_next_phase(ctx)
+
+      with :ok <- maybe_ensure_base_branch(ctx) do
+        run_next_phase(ctx)
+      end
     else
       {:error, reason} -> {:error, {:state_event_failed, reason}}
     end
@@ -78,7 +87,8 @@ defmodule SymphonyElixir.Duet.PairRunner do
       worker_host: worker_host,
       profile: profile,
       max_cycles: settings.duet.max_cycles_per_phase,
-      code_phase_cap_policy: String.to_atom(settings.duet.code_phase_cap_policy)
+      code_phase_cap_policy: String.to_atom(settings.duet.code_phase_cap_policy),
+      side_effects: Keyword.get(opts, :side_effects, false)
     }
   end
 
@@ -109,14 +119,17 @@ defmodule SymphonyElixir.Duet.PairRunner do
   defp run_phase(ctx) do
     case phase_actors(ctx.profile, ctx.phase) do
       {:ok, author, reviewer, author_role, reviewer_role} ->
-        ctx
-        |> Map.merge(%{
-          author: author,
-          reviewer: reviewer,
-          author_role: author_role,
-          reviewer_role: reviewer_role
-        })
-        |> run_cycle(1, [], %{author_last: nil, reviewer_last_authored: nil}, nil)
+        ctx =
+          Map.merge(ctx, %{
+            author: author,
+            reviewer: reviewer,
+            author_role: author_role,
+            reviewer_role: reviewer_role
+          })
+
+        with :ok <- maybe_ensure_phase_branch(ctx) do
+          run_cycle(ctx, 1, [], %{author_last: nil, reviewer_last_authored: nil}, nil)
+        end
 
       {:error, reason} ->
         with :ok <- ensure_failure_event(ctx.issue, Atom.to_string(reason)) do
@@ -183,6 +196,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
     with :ok <- maybe_request_human_checkpoint(ctx, cycle, tree_hash),
          :ok <- maybe_check_review_code_pr_mergeability(ctx, cycle),
          :ok <- append_phase_frozen(ctx, cycle, freeze_mode(mode), tree_hash),
+         :ok <- maybe_execute_freeze_side_effects(ctx),
          :ok <- maybe_write_superpower_artifact(ctx, cycle),
          :ok <- maybe_append_task_completed(ctx, cycle) do
       maybe_pause_on_freeze(ctx, cycle)
@@ -696,6 +710,78 @@ defmodule SymphonyElixir.Duet.PairRunner do
       tree_hash: tree_hash,
       reason: "human_checkpoint"
     }
+  end
+
+  # -- Side effects (branch + PR operations, gated by `side_effects: true`) --
+
+  defp maybe_ensure_base_branch(%{side_effects: true} = ctx) do
+    BranchHarness.ensure_base_branch(task_id(ctx.issue), branch_harness_opts(ctx))
+  end
+
+  defp maybe_ensure_base_branch(_ctx), do: :ok
+
+  defp maybe_ensure_phase_branch(%{side_effects: true} = ctx) do
+    BranchHarness.ensure_phase_branch(task_id(ctx.issue), ctx.phase, branch_harness_opts(ctx))
+  end
+
+  defp maybe_ensure_phase_branch(_ctx), do: :ok
+
+  defp maybe_execute_freeze_side_effects(%{side_effects: true} = ctx) do
+    task_id = task_id(ctx.issue)
+    pr_number = resolve_phase_pr_number(ctx)
+
+    PRLifecycle.execute_freeze_actions(ctx.phase, pr_number, freeze_action_opts(ctx, task_id))
+  end
+
+  defp maybe_execute_freeze_side_effects(_ctx), do: :ok
+
+  defp resolve_phase_pr_number(%{pr_number: n}) when is_integer(n), do: n
+
+  defp resolve_phase_pr_number(%{phase: "REVIEW"} = ctx) do
+    case PRLifecycle.resolve_code_pr_number(%{task_id: task_id(ctx.issue)}) do
+      {:ok, number} -> number
+      {:error, _} -> nil
+    end
+  end
+
+  defp resolve_phase_pr_number(ctx) do
+    case EventLog.read(ctx.issue) do
+      {:ok, events} ->
+        events
+        |> Enum.filter(&(&1["kind"] == "pr_opened" && &1["phase"] == ctx.phase))
+        |> List.last()
+        |> case do
+          %{"pr_number" => n} when is_integer(n) -> n
+          _ -> nil
+        end
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  defp branch_harness_opts(ctx) do
+    opts = [cwd: ctx.workspace]
+
+    case Keyword.get(ctx.opts, :branch_runner) do
+      runner when is_atom(runner) and not is_nil(runner) -> Keyword.put(opts, :runner, runner)
+      _ -> opts
+    end
+  end
+
+  defp freeze_action_opts(ctx, task_id) do
+    opts = [task_id: task_id, cwd: ctx.workspace]
+
+    opts =
+      case Keyword.get(ctx.opts, :gh_runner) do
+        runner when is_atom(runner) and not is_nil(runner) -> Keyword.put(opts, :runner, runner)
+        _ -> opts
+      end
+
+    case Keyword.get(ctx.opts, :branch_runner) do
+      runner when is_atom(runner) and not is_nil(runner) -> Keyword.put(opts, :branch_runner, runner)
+      _ -> opts
+    end
   end
 
   defp maybe_pause_on_freeze(ctx) do

@@ -20,6 +20,17 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
     end
   end
 
+  defmodule MockBranchRunner do
+    @moduledoc false
+    @behaviour SymphonyElixir.Duet.BranchHarness.Runner
+
+    @impl SymphonyElixir.Duet.BranchHarness.Runner
+    def run(args, opts) do
+      send(self(), {:branch_invoked, args, opts})
+      {:ok, ""}
+    end
+  end
+
   defp put_response(response), do: Process.put(:gh_cli_response, response)
 
   defp assert_invoked(expected_args) do
@@ -226,7 +237,7 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
   end
 
   describe "execute_freeze_actions/3" do
-    test "SPEC merges phase PR and records events" do
+    test "SPEC merges phase PR, cleans up branch, and records events" do
       put_response({:ok, ""})
 
       assert :ok =
@@ -235,22 +246,23 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
                  42,
                  cwd: "/tmp/ws",
                  task_id: "test-task-001",
-                 runner: MockRunner
+                 runner: MockRunner,
+                 branch_runner: MockBranchRunner
                )
 
-      # merge_phase_pr_into_base triggers a merge
       assert_invoked(["pr", "merge", "42", "--merge"])
 
-      # Event log should have freeze_action_executed entries
       assert {:ok, events} = EventLog.read("test-task-001")
       freeze_events = Enum.filter(events, &(&1["kind"] == "freeze_action_executed"))
       actions = Enum.map(freeze_events, & &1["action"])
       assert "merge_phase_pr_into_base" in actions
       assert "delete_phase_sub_branch" in actions
       assert "emit_phase_freeze_message" in actions
+
+      assert_received {:branch_invoked, ["worktree", "remove", "--force", _path], _opts}
     end
 
-    test "PLAN merges phase PR" do
+    test "PLAN merges phase PR and cleans up branch" do
       put_response({:ok, ""})
 
       assert :ok =
@@ -259,10 +271,12 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
                  50,
                  cwd: "/tmp/ws",
                  task_id: "test-task-001",
-                 runner: MockRunner
+                 runner: MockRunner,
+                 branch_runner: MockBranchRunner
                )
 
       assert_invoked(["pr", "merge", "50", "--merge"])
+      assert_received {:branch_invoked, ["worktree", "remove", "--force", _path], _opts}
     end
 
     test "CODE holds PR open (no merge, no mark_ready)" do
@@ -288,7 +302,7 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
       assert "record_code_tree_hash" in actions
     end
 
-    test "REVIEW merges CODE PR" do
+    test "REVIEW marks ready, merges CODE PR, merges base, cleans up branch" do
       put_response({:ok, ""})
 
       assert :ok =
@@ -297,17 +311,23 @@ defmodule SymphonyElixir.DuetPRLifecycleTest do
                  77,
                  cwd: "/tmp/ws",
                  task_id: "test-task-001",
-                 runner: MockRunner
+                 runner: MockRunner,
+                 branch_runner: MockBranchRunner
                )
 
+      assert_invoked(["pr", "ready", "77"])
       assert_invoked(["pr", "merge", "77", "--merge"])
 
       assert {:ok, events} = EventLog.read("test-task-001")
       freeze_events = Enum.filter(events, &(&1["kind"] == "freeze_action_executed"))
       actions = Enum.map(freeze_events, & &1["action"])
+      assert "mark_code_pr_ready" in actions
       assert "merge_code_pr_into_base" in actions
+      assert "merge_base_branch" in actions
       assert "delete_code_sub_branch" in actions
       assert "emit_task_completed" in actions
+
+      assert_received {:branch_invoked, ["checkout", "main"], _opts}
     end
 
     test "error propagation stops remaining actions" do
