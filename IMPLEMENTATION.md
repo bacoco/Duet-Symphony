@@ -21,6 +21,7 @@ upstream source code has been imported yet.
 | Local step | Upstream ref | Upstream SHA | Local path | Notes |
 |------------|--------------|--------------|------------|-------|
 | Strategy inspection | `upstream/main` | `58cf97da06d556c019ccea20c67f4f77da124bf3` | none | Read-only inspection; no upstream code imported |
+| Initial subtree import | `upstream/main` | `58cf97da06d556c019ccea20c67f4f77da124bf3` | `elixir/` | Imported upstream `elixir/` subtree; preserved Apache-2.0 files as `elixir/LICENSE` and `elixir/NOTICE` |
 
 Each future import or upgrade MUST add a row to this table with the exact
 upstream SHA that was imported.

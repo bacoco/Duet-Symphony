@@ -1,10 +1,10 @@
 Duet-Symphony
 Copyright 2024 bacoco
 
-This project is inspired by and derives design concepts from OpenAI Symphony
-(https://github.com/openai/symphony), which is licensed under the Apache
-License, Version 2.0.
+The Elixir implementation under elixir/ is derived from OpenAI Symphony
+(https://github.com/openai/symphony) at upstream ref
+58cf97da06d556c019ccea20c67f4f77da124bf3, licensed under Apache-2.0. See
+elixir/LICENSE and elixir/NOTICE.
 
-When the implementation includes code copied or derived from OpenAI Symphony,
-the Apache-2.0 license, copyright notices, and NOTICE attribution from that
-project must be preserved.
+The Duet-Symphony specification under spec/ and the design overlay are
+licensed under MIT. See LICENSE.
