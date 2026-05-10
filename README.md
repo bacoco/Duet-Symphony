@@ -3,8 +3,11 @@
 A Symphony-compatible Claude/Codex orchestration harness with operator-selected
 agent routing.
 
-Status: **design only**. The full design lives in [`spec/SPEC.md`](./spec/SPEC.md).
-No implementation yet.
+Status: **implementation baseline imported**. The full design lives in
+[`spec/SPEC.md`](./spec/SPEC.md). The current Elixir slice preserves Symphony's
+default single-Codex behavior, renames the binary to `duet-symphony`, parses a
+minimal `duet:` config block, and adds a tested `Duet.PairRunner` stub. Full
+Claude/Codex duet orchestration is not implemented yet.
 
 ## In one paragraph
 
@@ -45,7 +48,7 @@ Duet-Symphony/
 ├── spec/                  # Language-agnostic specification (standalone)
 │   ├── README.md          #   Reading guide for implementers
 │   └── SPEC.md            #   Normative spec v0.4.1
-├── elixir/                # After import: Symphony-derived implementation (Apache-2.0)
+├── elixir/                # Symphony-derived Elixir implementation (Apache-2.0)
 ├── AGENTS.md              # Project handoff notes and implementation guidance
 ├── IMPLEMENTATION.md      # Import strategy and implementation checkpoints
 ├── REVIEW.md              # Design review and risk backlog
@@ -59,14 +62,13 @@ Duet-Symphony/
 language is in [`spec/`](./spec/). See [`spec/README.md`](./spec/README.md)
 for the reading order.
 
-**For contributors:** the implementation (a Symphony fork with Duet
-pair-runtime overlay) will live alongside `spec/` once development begins.
-`AGENTS.md` has the current implementation roadmap.
+**For contributors:** the implementation is a Symphony fork with a Duet
+pair-runtime overlay under [`elixir/`](./elixir/). `AGENTS.md` has the current
+implementation roadmap.
 
-After the implementation import, `elixir/` is treated as Symphony-derived code
-under Apache-2.0 and carries its own `elixir/LICENSE` and `elixir/NOTICE`.
-The root `LICENSE` remains the MIT license for Duet-Symphony's original spec
-and design overlay.
+The `elixir/` subtree is treated as Symphony-derived code under Apache-2.0 and
+carries its own `elixir/LICENSE` and `elixir/NOTICE`. The root `LICENSE`
+remains the MIT license for Duet-Symphony's original spec and design overlay.
 
 The spec now also defines an initial operator routing menu, per-phase
 human-in-the-loop checkpoints, optional verification gates, draft PR lifecycle,

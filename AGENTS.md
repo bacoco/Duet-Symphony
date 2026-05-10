@@ -25,8 +25,14 @@ as the artifact and convergence substrate.
 
 ## Current State
 
-- Design/spec only. There is no implementation yet.
 - `spec/SPEC.md` is the source of truth.
+- `elixir/` contains the Symphony-derived Elixir implementation imported from
+  OpenAI Symphony. It preserves Apache-2.0 license/NOTICE attribution.
+- The first Duet implementation slice is in place: the escript binary is
+  `duet-symphony`, `Config.Schema` parses a minimal `duet:` block,
+  `RunnerSelector` keeps `AgentRunner` as the default compatibility runner,
+  and `Duet.PairRunner.run/3` is a tested `{:error, :not_implemented}` stub.
+- Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
 - Preserve upstream compatibility. Prefer a fork/subtree/overlay strategy that
@@ -40,14 +46,17 @@ as the artifact and convergence substrate.
 - `github_bot` is specified, but current Claude workflows from the source repo
   are only examples. A conformant bot flow must produce parseable Duet trailers
   and/or GitHub review states.
+- `elixir/AGENTS.md` is OpenAI Symphony's upstream contributor guide preserved
+  as part of the imported baseline. This root `AGENTS.md` is the canonical
+  guidance for Duet-Symphony work.
 
 ## Next Implementation Step
 
-Study and import the OpenAI Symphony implementation with the smallest possible
-Duet patch set. Follow `IMPLEMENTATION.md` for the exact upstream sync
-procedure, imported SHA tracking, and licensing requirements.
+Follow `IMPLEMENTATION.md` for the exact upstream sync procedure, imported SHA
+tracking, licensing requirements, and implementation checkpoints. Stay on
+`main` unless the user explicitly asks for a branch.
 
-First slice:
+Completed first slice:
 
 1. Import upstream Symphony's `elixir/` subtree under local `elixir/` and
    preserve Apache-2.0 license/NOTICE attribution.
@@ -61,23 +70,27 @@ First slice:
 6. Add `Duet.PairRunner.run/3` only as a tested stub returning
    `{:error, :not_implemented}` when `duet.enabled: true`.
 
-Subsequent slices:
+Next slice:
 
 1. Extract shared workspace lifecycle setup from `AgentRunner` before giving
-   `Duet.PairRunner` real behavior.
-2. Add the initial operator routing menu/UI so a task can choose Claude,
+   `Duet.PairRunner` real behavior. Do not duplicate workspace creation, hook
+   execution, remote-worker support, or cleanup logic inside `PairRunner`.
+
+Subsequent slices:
+
+1. Add the initial operator routing menu/UI so a task can choose Claude,
    Codex, both, human checkpoints, or a custom per-phase profile before
    dispatch.
-3. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
+2. Keep `WORKFLOW.md` as the primary repo-owned workflow contract and add Duet
    settings under a `duet:` front-matter key.
-4. Use Codex App Server for the Codex half first; add Codex Cloud as an
+3. Use Codex App Server for the Codex half first; add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
-5. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
+4. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
    Claude half; do not rely on fragile TTY automation unless no better option
    exists.
-6. Parse only the final `---DUET-TRAILER---` block from each agent response and
+5. Parse only the final `---DUET-TRAILER---` block from each agent response and
    persist structured events to `.duet/logs/tasks/<task_id>/events.jsonl`.
-7. Add optional SuperPower artifact support under `docs/superpowers/` for
+6. Add optional SuperPower artifact support under `docs/superpowers/` for
    SPEC/PLAN/REVIEW, keeping `.duet/` as the machine-state source of truth.
 
 ## Known Design Constraints

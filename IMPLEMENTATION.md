@@ -1,7 +1,8 @@
 # Duet-Symphony Implementation Plan
 
-This document records the implementation strategy before importing upstream
-Symphony code. The normative behavior remains in `spec/SPEC.md`.
+This document records the upstream import strategy and implementation
+checkpoints for the Symphony-derived Elixir code. The normative behavior
+remains in `spec/SPEC.md`.
 
 ## Checkpoint 1: Upstream Symphony Baseline
 
@@ -13,8 +14,8 @@ Symphony code. The normative behavior remains in `spec/SPEC.md`.
 - Main implementation subtree upstream: `elixir/`
 - Upstream license: Apache-2.0
 
-The local repo is intentionally still design-only at this checkpoint. No
-upstream source code has been imported yet.
+The imported implementation lives under `elixir/`. Keep `spec/` standalone and
+avoid merging upstream root files over this repo's root project surface.
 
 ## Sync History
 
@@ -80,10 +81,10 @@ Future skill imports must be explicit, must preserve provenance, and should
 either live under a clearly attributed upstream path or be rewritten as
 Duet-specific skills.
 
-Do not merge upstream root files over this repo's root `README.md`, `SPEC.md`,
-`LICENSE`, or `NOTICE`. This repo's root remains the Duet project surface;
-OpenAI Symphony provenance is preserved inside the imported implementation and
-in the root `NOTICE`.
+Do not merge upstream root files over this repo's root `README.md`,
+`spec/SPEC.md`, `LICENSE`, or `NOTICE`. This repo's root remains the Duet
+project surface; OpenAI Symphony provenance is preserved inside the imported
+implementation and in the root `NOTICE`.
 
 ## Boundary Verification
 
@@ -167,6 +168,27 @@ The first slice is complete only when all of these are true:
 7. Unit tests cover `duet:` config parsing and runner selection.
 
 Full Claude/Codex duet orchestration is explicitly outside this first slice.
+
+## First Slice Status
+
+The first slice is complete.
+
+- Baseline import was validated before local Duet edits. The local baseline had
+  one isolated upstream timing flake, documented below, and the GitHub Actions
+  baseline passed on the pinned Erlang/Elixir versions.
+- The escript binary is renamed from `symphony` to `duet-symphony`; `mix build`
+  creates `bin/duet-symphony` and no `bin/symphony`.
+- `Config.Schema` accepts a `duet:` front matter block with `enabled: true` and
+  still defaults to the existing Symphony behavior when the block is absent.
+- `RunnerSelector.choose/1` returns `AgentRunner` by default and
+  `Duet.PairRunner` when `duet.enabled: true`.
+- `Duet.PairRunner.run/3` remains a tested stub returning
+  `{:error, :not_implemented}`.
+- Verification after the slice: `mix format --check-formatted`, targeted unit
+  tests, and full `mix test` all pass locally.
+
+The next slice must extract or share `AgentRunner`'s workspace lifecycle before
+adding real Claude/Codex behavior to `Duet.PairRunner`.
 
 ## Baseline Test Status
 

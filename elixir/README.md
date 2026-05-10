@@ -1,15 +1,11 @@
-# Symphony Elixir
+# Duet-Symphony Elixir
 
-This directory contains the current Elixir/OTP implementation of Symphony, based on
-[`SPEC.md`](../SPEC.md) at the repository root.
+This directory contains the Symphony-derived Elixir/OTP implementation for Duet-Symphony, based on
+[`spec/SPEC.md`](../spec/SPEC.md) at the repository root.
 
 > [!WARNING]
 > Symphony Elixir is prototype software intended for evaluation only and is presented as-is.
-> We recommend implementing your own hardened version based on `SPEC.md`.
-
-## Screenshot
-
-![Symphony Elixir screenshot](../.github/media/elixir-screenshot.png)
+> We recommend implementing your own hardened version based on [`spec/SPEC.md`](../spec/SPEC.md).
 
 ## How it works
 
@@ -56,24 +52,23 @@ mise exec -- elixir --version
 ## Run
 
 ```bash
-git clone https://github.com/openai/symphony
-cd symphony/elixir
+cd elixir
 mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
-mise exec -- ./bin/symphony ./WORKFLOW.md
+mise exec -- ./bin/duet-symphony ./WORKFLOW.md
 ```
 
 ## Configuration
 
-Pass a custom workflow file path to `./bin/symphony` when starting the service:
+Pass a custom workflow file path to `./bin/duet-symphony` when starting the service:
 
 ```bash
-./bin/symphony /path/to/custom/WORKFLOW.md
+./bin/duet-symphony /path/to/custom/WORKFLOW.md
 ```
 
-If no path is passed, Symphony defaults to `./WORKFLOW.md`.
+If no path is passed, Duet-Symphony defaults to `./WORKFLOW.md`.
 
 Optional flags:
 
@@ -165,7 +160,6 @@ The observability UI now runs on a minimal Phoenix stack:
 - `lib/`: application code and Mix tasks
 - `test/`: ExUnit coverage for runtime behavior
 - `WORKFLOW.md`: in-repo workflow contract used by local runs
-- `../.codex/`: repository-local Codex skills and setup helpers
 
 ## Testing
 
@@ -213,9 +207,10 @@ actively running subagents, which is very useful during development.
 
 ### What's the easiest way to set this up for my own codebase?
 
-Launch `codex` in your repo, give it the URL to the Symphony repo, and ask it to set things up for
-you.
+Launch `codex` in your repo, give it the URL to the Duet-Symphony repo, and ask it to set things up
+for you.
 
 ## License
 
-This project is licensed under the [Apache License 2.0](../LICENSE).
+This subtree is derived from OpenAI Symphony and licensed under the
+[Apache License 2.0](LICENSE). The root Duet-Symphony spec and design overlay remain MIT-licensed.
