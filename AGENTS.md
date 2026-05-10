@@ -44,6 +44,9 @@ as the artifact and convergence substrate.
   `phase_started` events idempotently plus the current stub `task_failed`
   marker, and `Duet.TaskState` reconstructs task/phase state while surfacing
   routing divergence without discarding recovered state.
+- The first operator routing menu slice is in place: the observability
+  dashboard and `/api/v1/duet/routing` can select the runtime Duet profile
+  from the configured profiles, and `PairRunner` consumes that selection.
 - Full Claude/Codex duet orchestration is not implemented yet.
 - The current target is Symphony parity plus Duet pair-runtime behavior, not a
   reduced local CLI MVP.
@@ -84,16 +87,17 @@ Completed first slice:
 7. Stabilize the initial event log/recovery contract: PairRunner startup
    events are idempotent across retries, the stub records `task_failed`, and
    `TaskState.recover/2` returns recovered state even when routing diverges.
+8. Add the first operator routing menu/API so a runtime can choose the active
+   Duet profile before future tasks dispatch.
 
 Next slice:
 
-1. Add the initial operator routing menu/UI so a task can choose Claude,
-   Codex, both, human checkpoints, or a custom per-phase profile before
-   dispatch and persist that selected profile.
+1. Use Codex App Server for the Codex half of the real pair loop while keeping
+   the existing `AgentRunner` compatibility path intact.
 
 Subsequent slices:
 
-1. Use Codex App Server for the Codex half first; add Codex Cloud as an
+1. Add Codex Cloud as an
    optional asynchronous runtime once the local pair loop works.
 2. Use Claude Code structured print/resume/streaming or GitHub bot mode for the
    Claude half; do not rely on fragile TTY automation unless no better option

@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.RunnerSelectorTest do
   use SymphonyElixir.TestSupport
 
-  alias SymphonyElixir.Duet.EventLog
+  alias SymphonyElixir.Duet.{EventLog, RoutingSelection}
   alias SymphonyElixir.Duet.PairRunner
   alias SymphonyElixir.RunnerSelector
 
@@ -29,6 +29,7 @@ defmodule SymphonyElixir.RunnerSelectorTest do
 
       issue = %Issue{id: "issue-duet", identifier: "DUET-1"}
       EventLog.set_root(Path.join(test_root, ".duet/logs"))
+      assert {:ok, _payload} = RoutingSelection.select(Config.settings!().duet, "codex_only_dev")
 
       assert {:error, :not_implemented} = PairRunner.run(issue)
       assert {:error, :not_implemented} = PairRunner.run(issue, self())
@@ -36,6 +37,7 @@ defmodule SymphonyElixir.RunnerSelectorTest do
 
       assert {:ok, events} = EventLog.read(issue)
       assert Enum.map(events, & &1["kind"]) == ["task_started", "agent_routing_selected", "phase_started", "task_failed"]
+      assert Enum.find(events, &(&1["kind"] == "agent_routing_selected"))["profile_name"] == "codex_only_dev"
     after
       File.rm_rf(test_root)
     end

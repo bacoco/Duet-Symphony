@@ -99,12 +99,37 @@ defmodule SymphonyElixir.Duet.Routing do
   def resolve(agent_routing) when is_map(agent_routing) do
     routing = merged_agent_routing(agent_routing)
     default_profile = Map.get(routing, "default_profile", "duet_balanced")
+
+    case resolve_profile(routing, default_profile) do
+      {:error, {:unknown_profile, ^default_profile}} -> {:error, {:unknown_default_profile, default_profile}}
+      result -> result
+    end
+  end
+
+  @spec resolve(map() | struct(), String.t()) :: {:ok, profile()} | {:error, term()}
+  def resolve(%{agent_routing: agent_routing}, profile_name), do: resolve(agent_routing, profile_name)
+
+  def resolve(agent_routing, profile_name) when is_map(agent_routing) and is_binary(profile_name) do
+    agent_routing
+    |> merged_agent_routing()
+    |> resolve_profile(profile_name)
+  end
+
+  @spec available_profiles(map() | struct()) :: {:ok, [profile()]} | {:error, term()}
+  def available_profiles(%{agent_routing: agent_routing}), do: available_profiles(agent_routing)
+
+  def available_profiles(agent_routing) when is_map(agent_routing) do
+    routing = merged_agent_routing(agent_routing)
     profiles = Map.get(routing, "profiles", %{})
 
-    case Map.fetch(profiles, default_profile) do
-      {:ok, raw_profile} -> parse_profile(default_profile, raw_profile)
-      :error -> {:error, {:unknown_default_profile, default_profile}}
-    end
+    profiles
+    |> Enum.sort_by(fn {name, _raw_profile} -> name end)
+    |> Enum.reduce_while({:ok, []}, fn {name, raw_profile}, {:ok, parsed} ->
+      case parse_profile(name, raw_profile) do
+        {:ok, profile} -> {:cont, {:ok, parsed ++ [profile]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   @spec validate_config(map()) :: :ok | {:error, String.t()}
@@ -123,6 +148,15 @@ defmodule SymphonyElixir.Duet.Routing do
 
   defp merged_agent_routing(agent_routing) do
     deep_merge(default_agent_routing_config(), normalize_keys(agent_routing))
+  end
+
+  defp resolve_profile(routing, profile_name) do
+    profiles = Map.get(routing, "profiles", %{})
+
+    case Map.fetch(profiles, profile_name) do
+      {:ok, raw_profile} -> parse_profile(profile_name, raw_profile)
+      :error -> {:error, {:unknown_profile, profile_name}}
+    end
   end
 
   defp validate_default_profile(routing) do

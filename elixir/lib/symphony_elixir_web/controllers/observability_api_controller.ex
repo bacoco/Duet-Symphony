@@ -6,6 +6,8 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
+  alias SymphonyElixir.Config
+  alias SymphonyElixir.Duet.RoutingSelection
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
   @spec state(Conn.t(), map()) :: Conn.t()
@@ -34,6 +36,28 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
       {:error, :unavailable} ->
         error_response(conn, 503, "orchestrator_unavailable", "Orchestrator is unavailable")
+    end
+  end
+
+  @spec duet_routing(Conn.t(), map()) :: Conn.t()
+  def duet_routing(conn, _params) do
+    case RoutingSelection.payload(Config.settings!().duet) do
+      {:ok, payload} -> json(conn, payload)
+      {:error, reason} -> error_response(conn, 422, "invalid_duet_routing", inspect(reason))
+    end
+  end
+
+  @spec select_duet_routing(Conn.t(), map()) :: Conn.t()
+  def select_duet_routing(conn, params) do
+    profile_name = Map.get(params, "profile_name") || Map.get(params, "profile")
+
+    case RoutingSelection.select(Config.settings!().duet, profile_name) do
+      {:ok, payload} ->
+        SymphonyElixirWeb.ObservabilityPubSub.broadcast_update()
+        json(conn, payload)
+
+      {:error, reason} ->
+        error_response(conn, 422, "invalid_routing_profile", inspect(reason))
     end
   end
 

@@ -15,7 +15,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
   useful work.
   """
 
-  alias SymphonyElixir.Duet.{EventLog, Routing}
+  alias SymphonyElixir.Duet.{EventLog, Routing, RoutingSelection}
   alias SymphonyElixir.RunnerRuntime
 
   @spec run(map(), pid() | nil, keyword()) :: {:error, term()}
@@ -33,7 +33,7 @@ defmodule SymphonyElixir.Duet.PairRunner do
   end
 
   defp ensure_initial_state_events(issue) do
-    case Routing.resolve(SymphonyElixir.Config.settings!().duet) do
+    case RoutingSelection.resolve(SymphonyElixir.Config.settings!().duet) do
       {:ok, profile} -> ensure_initial_state_events(issue, profile)
       {:error, reason} -> {:error, reason}
     end

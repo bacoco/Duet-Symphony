@@ -4,6 +4,7 @@ defmodule SymphonyElixir.ExtensionsTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
+  alias SymphonyElixir.Duet.RoutingSelection
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
 
@@ -376,8 +377,13 @@ defmodule SymphonyElixir.ExtensionsTest do
                "total_tokens" => 12,
                "seconds_running" => 42.5
              },
-             "rate_limits" => %{"primary" => %{"remaining" => 11}}
+             "rate_limits" => %{"primary" => %{"remaining" => 11}},
+             "duet" => state_payload["duet"]
            }
+
+    assert state_payload["duet"]["selected_profile"] == "duet_balanced"
+    assert state_payload["duet"]["selection_source"] == "default"
+    assert Enum.map(state_payload["duet"]["profiles"], & &1["name"]) == ["claude_only_dev", "codex_only_dev", "duet_balanced"]
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
     issue_payload = json_response(conn, 200)
@@ -425,6 +431,14 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert %{"queued" => true, "coalesced" => false, "operations" => ["poll", "reconcile"]} =
              json_response(conn, 202)
+
+    conn = get(build_conn(), "/api/v1/duet/routing")
+    assert json_response(conn, 200)["selected_profile"] == "duet_balanced"
+
+    conn = post(build_conn(), "/api/v1/duet/routing", %{"profile_name" => "codex_only_dev"})
+    assert %{"selected_profile" => "codex_only_dev", "selection_source" => "operator"} = json_response(conn, 200)
+
+    assert RoutingSelection.selected_profile_name(Config.settings!().duet) == "codex_only_dev"
   end
 
   test "phoenix observability api preserves 405, 404, and unavailable behavior" do
@@ -548,12 +562,23 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Offline"
     assert html =~ "Copy ID"
     assert html =~ "Codex update"
+    assert html =~ "Duet routing"
+    assert html =~ "duet_balanced"
     refute html =~ "data-runtime-clock="
     refute html =~ "setInterval(refreshRuntimeClocks"
     refute html =~ "Refresh now"
     refute html =~ "Transport"
     assert html =~ "status-badge-live"
     assert html =~ "status-badge-offline"
+
+    html =
+      view
+      |> form("#duet-routing-form", %{profile_name: "codex_only_dev"})
+      |> render_submit()
+
+    assert html =~ "codex_only_dev"
+    assert html =~ "degraded_single_agent"
+    assert RoutingSelection.selected_profile_name(Config.settings!().duet) == "codex_only_dev"
 
     updated_snapshot =
       put_in(snapshot.running, [

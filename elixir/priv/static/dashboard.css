@@ -397,6 +397,18 @@ pre,
   color: var(--muted);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .code-panel {
   margin-top: 1rem;
   padding: 1rem;
@@ -410,6 +422,41 @@ pre,
 .empty-state {
   margin: 1rem 0 0;
   color: var(--muted);
+}
+
+.routing-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.routing-form {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.routing-select {
+  min-width: 13rem;
+  min-height: 2.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  padding: 0 0.9rem;
+  font: inherit;
+  font-weight: 600;
+}
+
+.routing-meta {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.routing-table {
+  min-width: 640px;
 }
 
 .error-card {

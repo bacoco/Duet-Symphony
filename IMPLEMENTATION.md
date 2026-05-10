@@ -257,6 +257,25 @@ The first `.duet` persistence and recovery slices are complete.
   `routing_status = "diverged"` when they differ.
 - No Claude/Codex runtime calls are introduced in this slice.
 
+## Duet Routing Menu Status
+
+The first operator routing menu slice is complete.
+
+- `SymphonyElixir.Duet.RoutingSelection` exposes configured profiles, stores a
+  runtime-selected profile in application state, and resolves the effective
+  profile used by `PairRunner`.
+- `GET /api/v1/duet/routing` returns the available profiles, selected profile,
+  selection source, effective phase matrix, menu settings, and human
+  checkpoint settings.
+- `POST /api/v1/duet/routing` accepts `profile_name` and updates the runtime
+  selection after validating the profile exists in `duet.agent_routing`.
+- The LiveView dashboard renders a Duet routing section with a profile select
+  control and the effective SPEC/PLAN/CODE/REVIEW matrix.
+- This slice is runtime-global rather than per-task. A future dispatch gate
+  must persist per-task overrides with `routing_override_applied` when
+  `require_selection_before_dispatch` is enforced.
+- No external Claude/Codex calls are introduced in this slice.
+
 ## Local Modifications Inside elixir/
 
 The files listed below carry Duet-specific deltas on top of the upstream
@@ -273,8 +292,14 @@ this section in sync with the modifications applied per slice.
 | `lib/symphony_elixir/orchestrator.ex` | first runner slice | dispatch routed through `RunnerSelector`; raise wrapper surfaces runner module name in error message |
 | `lib/symphony_elixir/config/schema.ex` | routing config slice | added embedded `Duet` schema with core phase/routing fields and routing validation |
 | `lib/symphony_elixir/agent_runner.ex` | shared runner runtime slice | workspace lifecycle moved into `RunnerRuntime`; Codex turn behavior remains in `AgentRunner` |
+| `lib/symphony_elixir_web/controllers/observability_api_controller.ex` | routing menu slice | adds Duet routing profile GET/POST endpoints |
+| `lib/symphony_elixir_web/live/dashboard_live.ex` | routing menu slice | renders the operator Duet routing profile select and phase matrix |
+| `lib/symphony_elixir_web/presenter.ex` | routing menu slice | includes Duet routing payload in the observability state payload |
+| `lib/symphony_elixir_web/router.ex` | routing menu slice | routes `/api/v1/duet/routing` before issue detail routes |
 | `lib/symphony_elixir/log_file.ex` | event log slice | exposes the default Duet event log root for `--logs-root` integration |
-| `test/support/test_support.exs` | routing config slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures |
+| `priv/static/dashboard.css` | routing menu slice | styles the Duet routing select, metadata row, and phase table |
+| `test/support/test_support.exs` | routing menu slice | added `duet_yaml` helper for emitting simple and raw `duet:` blocks in test config fixtures; clears runtime routing profile selection between tests |
+| `test/symphony_elixir/extensions_test.exs` | routing menu slice | covers routing API payload, profile selection, and dashboard form behavior |
 | `test/symphony_elixir/log_file_test.exs` | event log slice | covers the default Duet event log root |
 | `test/symphony_elixir/core_test.exs` | timing stabilization slice | added assertions covering `duet.enabled` defaulting and parsing; widened two retry timing assertion windows near lines 562 and 604 after the same upstream timing flake failed on pinned GitHub Actions run `25628886607` |
 | `README.md` | first runner slice | repath SPEC link, removed unavailable screenshot, binary rename, license clause clarified, Apache-2.0 §4(b) modification notice added |
@@ -285,9 +310,11 @@ this section in sync with the modifications applied per slice.
 - `lib/symphony_elixir/runner_selector.ex`
 - `lib/symphony_elixir/duet/event_log.ex`
 - `lib/symphony_elixir/duet/routing.ex`
+- `lib/symphony_elixir/duet/routing_selection.ex`
 - `lib/symphony_elixir/duet/task_state.ex`
 - `lib/symphony_elixir/duet/pair_runner.ex`
 - `test/symphony_elixir/duet_event_log_test.exs`
+- `test/symphony_elixir/duet_routing_selection_test.exs`
 - `test/symphony_elixir/duet_task_state_test.exs`
 - `test/symphony_elixir/runner_selector_test.exs`
 - `test/symphony_elixir/duet_routing_test.exs`

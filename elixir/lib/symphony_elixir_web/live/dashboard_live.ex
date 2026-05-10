@@ -5,6 +5,8 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
 
+  alias SymphonyElixir.Config
+  alias SymphonyElixir.Duet.RoutingSelection
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
   @runtime_tick_ms 1_000
 
@@ -35,6 +37,22 @@ defmodule SymphonyElixirWeb.DashboardLive do
      socket
      |> assign(:payload, load_payload())
      |> assign(:now, DateTime.utc_now())}
+  end
+
+  @impl true
+  def handle_event("select-duet-routing", %{"profile_name" => profile_name}, socket) do
+    case RoutingSelection.select(Config.settings!().duet, profile_name) do
+      {:ok, _payload} ->
+        ObservabilityPubSub.broadcast_update()
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Duet routing profile updated")
+         |> assign(:payload, load_payload())}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Invalid Duet routing profile: #{inspect(reason)}")}
+    end
   end
 
   @impl true
@@ -105,6 +123,66 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
           </article>
         </section>
+
+        <%= if duet_menu?(@payload) do %>
+          <section class="section-card routing-section">
+            <div class="section-header">
+              <div>
+                <h2 class="section-title">Duet routing</h2>
+                <p class="section-copy">
+                  <%= routing_summary(@payload.duet) %>
+                </p>
+              </div>
+
+              <form id="duet-routing-form" class="routing-form" phx-submit="select-duet-routing">
+                <label class="sr-only" for="duet-routing-profile">Routing profile</label>
+                <select id="duet-routing-profile" name="profile_name" class="routing-select">
+                  <option
+                    :for={profile <- @payload.duet.profiles}
+                    value={profile.name}
+                    selected={profile.name == @payload.duet.selected_profile}
+                  >
+                    <%= profile.name %>
+                  </option>
+                </select>
+                <button type="submit">Apply</button>
+              </form>
+            </div>
+
+            <div class="routing-meta">
+              <span class={routing_mode_class(@payload.duet.effective_profile)}>
+                <%= @payload.duet.effective_profile.mode %>
+              </span>
+              <span class="muted">
+                Source: <span class="mono"><%= @payload.duet.selection_source %></span>
+              </span>
+              <span class="muted">
+                Default: <span class="mono"><%= @payload.duet.default_profile %></span>
+              </span>
+            </div>
+
+            <div class="table-wrap">
+              <table class="data-table routing-table">
+                <thead>
+                  <tr>
+                    <th>Phase</th>
+                    <th>Author</th>
+                    <th>Reviewers</th>
+                    <th>Human</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={phase <- @payload.duet.effective_profile.phases}>
+                    <td class="mono"><%= phase.phase %></td>
+                    <td><%= phase.author || "n/a" %></td>
+                    <td><%= reviewers_label(phase.reviewers) %></td>
+                    <td><%= human_label(phase) %></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        <% end %>
 
         <section class="section-card">
           <div class="section-header">
@@ -252,6 +330,27 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp load_payload do
     Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
   end
+
+  defp duet_menu?(%{duet: %{menu_enabled: true}}), do: true
+  defp duet_menu?(_payload), do: false
+
+  defp routing_summary(%{enabled: true, selected_profile: profile}), do: "Active profile: #{profile}"
+  defp routing_summary(%{selected_profile: profile}), do: "Configured profile: #{profile}"
+  defp routing_summary(_duet), do: "Routing unavailable"
+
+  defp routing_mode_class(%{degraded: true}), do: "state-badge state-badge-warning"
+  defp routing_mode_class(_profile), do: "state-badge state-badge-active"
+
+  defp reviewers_label(reviewers) when is_list(reviewers) and reviewers != [], do: Enum.join(reviewers, ", ")
+  defp reviewers_label(_reviewers), do: "none"
+
+  defp human_label(%{reviewer: "human"}), do: "review"
+
+  defp human_label(%{reviewers: reviewers}) when is_list(reviewers) do
+    if "human" in reviewers, do: "review", else: "none"
+  end
+
+  defp human_label(_phase), do: "none"
 
   defp orchestrator do
     Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
