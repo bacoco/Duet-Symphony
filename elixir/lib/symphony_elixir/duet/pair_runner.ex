@@ -1199,6 +1199,13 @@ defmodule SymphonyElixir.Duet.PairRunner do
     state_divergence: :state_divergence
   }
 
+  for key <- Map.keys(@notification_mapping) do
+    unless key in @awaiting_reasons do
+      raise CompileError,
+        description: "notification_mapping key #{key} is not a valid awaiting_operator reason"
+    end
+  end
+
   defp maybe_dispatch_notification({:error, reason}, issue, opts) do
     case Map.get(@notification_mapping, reason) do
       nil ->
@@ -1206,18 +1213,17 @@ defmodule SymphonyElixir.Duet.PairRunner do
 
       hook_event ->
         payload = %{task_id: task_id(issue), reason: reason}
-        hook_opts = Keyword.take(opts, [:notification_hook_runner])
 
         hook_opts =
-          case Keyword.get(hook_opts, :notification_hook_runner) do
-            runner when is_atom(runner) and not is_nil(runner) ->
-              [runner: runner]
-
-            _ ->
-              []
+          case opts[:notification_hook_runner] do
+            runner when is_atom(runner) and not is_nil(runner) -> [runner: runner]
+            _ -> []
           end
 
-        NotificationHook.dispatch(hook_event, payload, hook_opts)
+        case NotificationHook.dispatch(hook_event, payload, hook_opts) do
+          :ok -> :ok
+          {:error, err} -> Logger.warning("[Duet] Notification dispatch failed: #{inspect(err)}")
+        end
     end
   end
 
