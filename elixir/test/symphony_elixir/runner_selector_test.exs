@@ -3,20 +3,10 @@ defmodule SymphonyElixir.RunnerSelectorTest do
 
   alias SymphonyElixir.Duet.{EventLog, RoutingSelection, Transcripts}
   alias SymphonyElixir.Duet.PairRunner
+  alias SymphonyElixir.DuetTestHelpers.SequenceDriver
   alias SymphonyElixir.RunnerSelector
 
-  defmodule SequenceDriver do
-    @behaviour SymphonyElixir.Duet.TurnDriver
-
-    @impl SymphonyElixir.Duet.TurnDriver
-    def drive_turn(prompt, opts) do
-      agent = Keyword.fetch!(opts, :sequence_agent)
-      test_pid = Keyword.fetch!(opts, :test_pid)
-      response = Agent.get_and_update(agent, fn [next | rest] -> {next, rest} end)
-      send(test_pid, {:duet_prompt, prompt})
-      {:ok, response}
-    end
-  end
+  import SymphonyElixir.DuetTestHelpers, only: [approve_response: 1]
 
   test "selects AgentRunner by default" do
     assert RunnerSelector.choose(Config.settings!()) == AgentRunner
@@ -770,19 +760,6 @@ defmodule SymphonyElixir.RunnerSelectorTest do
     after
       File.rm_rf(test_root)
     end
-  end
-
-  defp approve_response(label) do
-    """
-    #{label}
-
-    ---DUET-TRAILER---
-    verdict: APPROVE
-    confidence: 0.9
-    summary: #{label} ready
-    unresolved: []
-    ---END-DUET-TRAILER---
-    """
   end
 
   defp request_changes_response(label, unresolved) do
