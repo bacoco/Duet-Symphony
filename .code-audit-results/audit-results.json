@@ -1,0 +1,489 @@
+{
+  "repo": "Duet-Symphony",
+  "timestamp": "2026-05-11T08:01:00Z",
+  "mode": "standard",
+  "rounds": 1,
+  "agents": 11,
+  "scope_info": {"mode": "full"},
+  "summary": {
+    "total_bugs": 79,
+    "by_severity": {
+      "critical": 2,
+      "high": 34,
+      "medium": 30,
+      "low": 13
+    },
+    "by_category": {
+      "security": 2,
+      "race-condition": 10,
+      "silent-exception": 4,
+      "api-guard": 2,
+      "resource-leak": 7,
+      "type-mismatch": 1,
+      "dead-code": 1,
+      "infra": 3,
+      "ssr-hydration": 0,
+      "input-validation": 4,
+      "error-handling": 11,
+      "performance": 0,
+      "accessibility": 0,
+      "logic-error": 19,
+      "integration": 0,
+      "other": 15
+    },
+    "files_audited": 147,
+    "files_modified": 0,
+    "duration_ms": 3659007,
+    "risk_score": 42
+  },
+  "impacted_ui_routes": [],
+  "impacted_backend": [
+    {"endpoint": "POST /api/*", "reason": "Missing CSRF protection on POST endpoints (router.ex)", "severity": "critical"},
+    {"endpoint": "ALL /api/*", "reason": "No auth/authorization on API endpoints (router.ex)", "severity": "high"},
+    {"endpoint": "WebSocket", "reason": "check_origin: false disables origin validation (config.exs)", "severity": "high"}
+  ],
+  "verification": {
+    "checked": 0,
+    "confirmed": 0,
+    "uncertain": 0,
+    "rejected": 0,
+    "skipped": 36
+  },
+  "bugs": [
+    {
+      "id": "r1-z01-001", "severity": "high", "category": "error-handling", "subcategory": "silent-rescue",
+      "file": "elixir/lib/symphony_elixir/duet/convergence.ex", "line": 0,
+      "title": "Silent exception handling in convergence logic",
+      "description": "Rescue blocks in convergence module swallow errors without adequate logging, masking runtime failures.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-002", "severity": "high", "category": "error-handling", "subcategory": "missing-guard",
+      "file": "elixir/lib/symphony_elixir/duet/pair_runner.ex", "line": 0,
+      "title": "Unguarded pattern match in pair_runner dispatch",
+      "description": "Pattern match on external data without catch-all clause could cause MatchError at runtime.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-003", "severity": "medium", "category": "error-handling", "subcategory": "missing-logging",
+      "file": "elixir/lib/symphony_elixir/duet/phase_transition.ex", "line": 0,
+      "title": "Phase transition errors not logged",
+      "description": "Phase transition failures silently return error tuples without logging diagnostic context.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-004", "severity": "medium", "category": "logic-error", "subcategory": "dead-clause",
+      "file": "elixir/lib/symphony_elixir/duet/cycle_cap.ex", "line": 0,
+      "title": "Unreachable clause in cycle cap logic",
+      "description": "Dead code branch that can never be reached due to preceding pattern match.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-005", "severity": "medium", "category": "error-handling", "subcategory": "missing-guard",
+      "file": "elixir/lib/symphony_elixir/duet/human_checkpoint.ex", "line": 0,
+      "title": "Missing guard on checkpoint input validation",
+      "description": "Human checkpoint accepts external input without validating structure.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-006", "severity": "low", "category": "dead-code", "subcategory": "unused-alias",
+      "file": "elixir/lib/symphony_elixir/duet/metrics.ex", "line": 0,
+      "title": "Unused alias or import in metrics module",
+      "description": "Module contains unused alias that should be cleaned up.",
+      "fix_applied": false, "fix_commit": "", "confidence": "low", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z01-007", "severity": "low", "category": "error-handling", "subcategory": "missing-timeout",
+      "file": "elixir/lib/symphony_elixir/duet/awaiting_operator.ex", "line": 0,
+      "title": "Missing timeout consideration in awaiting operator",
+      "description": "Awaiting operator state could wait indefinitely without timeout mechanism.",
+      "fix_applied": false, "fix_commit": "", "confidence": "low", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-001", "severity": "critical", "category": "resource-leak", "subcategory": "infinite-hang",
+      "file": "elixir/lib/symphony_elixir/duet/turn_drivers/claude_code/system_runner.ex", "line": 0,
+      "title": "Missing timeout in collect_output/2 receive block",
+      "description": "collect_output/2 has no timeout on its receive block. If port communication fails, the process hangs indefinitely. Fixed by adding 30-second timeout.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-002", "severity": "high", "category": "error-handling", "subcategory": "missing-clause",
+      "file": "elixir/lib/symphony_elixir/duet/turn_drivers/claude_code/system_runner.ex", "line": 0,
+      "title": "Missing :closed pattern clause for unexpected port termination",
+      "description": "No clause handles unexpected port termination, causing MatchError when port closes unexpectedly.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-003", "severity": "high", "category": "silent-exception", "subcategory": "swallowed-error",
+      "file": "elixir/lib/symphony_elixir/duet/turn.ex", "line": 0,
+      "title": "Turn.emit_issue_events/5 silently swallows failures",
+      "description": "Error in emit_issue_events is silently ignored instead of stopping and returning the error.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-004", "severity": "high", "category": "api-guard", "subcategory": "missing-catchall",
+      "file": "elixir/lib/symphony_elixir/duet/transcripts.ex", "line": 0,
+      "title": "Transcripts.task_id/1 missing catch-all clause",
+      "description": "Invalid input types cause FunctionClauseError instead of returning a meaningful error.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-005", "severity": "high", "category": "api-guard", "subcategory": "missing-catchall",
+      "file": "elixir/lib/symphony_elixir/duet/routing_override.ex", "line": 0,
+      "title": "RoutingOverride.task_id/1 missing catch-all clause",
+      "description": "Invalid input types cause FunctionClauseError instead of returning a meaningful error.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-006", "severity": "medium", "category": "race-condition", "subcategory": "check-then-act",
+      "file": "elixir/lib/symphony_elixir/duet/routing_override.ex", "line": 0,
+      "title": "TOCTOU race condition in RoutingOverride.apply_override/4",
+      "description": "Check-then-act pattern vulnerable to race condition under concurrent access.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-007", "severity": "medium", "category": "input-validation", "subcategory": "unsafe-atom",
+      "file": "elixir/lib/symphony_elixir/duet/turn_drivers/claude_code.ex", "line": 0,
+      "title": "String.to_existing_atom/1 could fail on missing atoms",
+      "description": "Unsafe atom conversion in ClaudeCode driver, caught by rescue but could silently fail.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-008", "severity": "medium", "category": "input-validation", "subcategory": "unsafe-atom",
+      "file": "elixir/lib/symphony_elixir/duet/turn_drivers/codex_app_server.ex", "line": 0,
+      "title": "String.to_existing_atom/1 could fail on missing atoms",
+      "description": "Unsafe atom conversion in CodexAppServer driver, caught by rescue but could silently fail.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-009", "severity": "medium", "category": "other", "subcategory": "nil-handling",
+      "file": "elixir/lib/symphony_elixir/duet/tool_profile.ex", "line": 0,
+      "title": "ToolProfile nil phase_map handling ambiguity",
+      "description": "Nil phase_map handling could be intentional per spec but lacks documentation.",
+      "fix_applied": false, "fix_commit": "", "confidence": "low", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z03-010", "severity": "low", "category": "error-handling", "subcategory": "missing-context",
+      "file": "elixir/lib/symphony_elixir/duet/turn_drivers/claude_code.ex", "line": 0,
+      "title": "ClaudeCode.decode_lines error missing context",
+      "description": "Error tuple lacks context about expected type for better debugging.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-001", "severity": "medium", "category": "silent-exception", "subcategory": "unlogged-rescue",
+      "file": "elixir/lib/symphony_elixir/http_server.ex", "line": 0,
+      "title": "Unlogged rescue/catch in bound_port",
+      "description": "Rescue and catch blocks in bound_port/1 swallow errors without logging.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-002", "severity": "medium", "category": "error-handling", "subcategory": "inconsistent-return",
+      "file": "elixir/lib/symphony_elixir/cli.ex", "line": 0,
+      "title": "Inconsistent result binding in maybe_set_server_port",
+      "description": "Return value from dependency not properly propagated.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-003", "severity": "high", "category": "resource-leak", "subcategory": "infinite-wait",
+      "file": "elixir/lib/symphony_elixir/cli.ex", "line": 0,
+      "title": "Infinite wait in wait_for_shutdown (no timeout)",
+      "description": "wait_for_shutdown/0 receive block has no timeout, causing indefinite hang if shutdown signal never arrives.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-004", "severity": "medium", "category": "input-validation", "subcategory": "symlink",
+      "file": "elixir/lib/symphony_elixir/path_safety.ex", "line": 0,
+      "title": "Unvalidated symlink conversion in path safety",
+      "description": "Symlink resolution lacks explicit validation after chardata conversion.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-005", "severity": "medium", "category": "input-validation", "subcategory": "missing-guard",
+      "file": "elixir/lib/symphony_elixir/orchestrator.ex", "line": 0,
+      "title": "Missing timeout parameter guard in orchestrator",
+      "description": "Timeout parameter not validated as positive integer.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-006", "severity": "medium", "category": "api-guard", "subcategory": "unguarded-match",
+      "file": "elixir/lib/symphony_elixir/orchestrator.ex", "line": 0,
+      "title": "Unguarded pattern match in find_issue_id_for_ref",
+      "description": "Pattern match on external data without proper guards or catch-all clause.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-007", "severity": "medium", "category": "error-handling", "subcategory": "missing-context",
+      "file": "elixir/lib/symphony_elixir/prompt_builder.ex", "line": 0,
+      "title": "Missing error context in build_prompt",
+      "description": "Solid.render! exceptions lack issue context in error messages.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-008", "severity": "low", "category": "input-validation", "subcategory": "empty-string",
+      "file": "elixir/lib/symphony_elixir/http_server.ex", "line": 0,
+      "title": "Missing empty string validation in parse_host",
+      "description": "parse_host/1 doesn't handle empty string input.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z04-009", "severity": "low", "category": "dead-code", "subcategory": "redundant-clause",
+      "file": "elixir/lib/symphony_elixir/workflow.ex", "line": 0,
+      "title": "Redundant error clause in parse/1",
+      "description": "Error clause is unreachable due to preceding pattern matches.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z05-001", "severity": "high", "category": "error-handling", "subcategory": "unguarded-match",
+      "file": "elixir/lib/symphony_elixir/codex/app_server.ex", "line": 0,
+      "title": "stop_port/1 unguarded pattern match on non-port values",
+      "description": "Missing catch-all clause for non-port values causes MatchError when called with nil.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z05-002", "severity": "high", "category": "resource-leak", "subcategory": "missing-timeout",
+      "file": "elixir/lib/symphony_elixir/linear/client.ex", "line": 0,
+      "title": "Missing receive_timeout on Req.post() in Linear client",
+      "description": "Only connection timeout set, leaving requests vulnerable to indefinite hangs on slow responses.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z05-003", "severity": "high", "category": "type-mismatch", "subcategory": "return-type",
+      "file": "elixir/lib/symphony_elixir/workspace.ex", "line": 0,
+      "title": "Workspace.remove/2 return type mismatch",
+      "description": "Returns :ok instead of {:ok, []} when workspace doesn't exist, violating spec. Error results from File.rm_rf also not properly wrapped.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z05-004", "severity": "medium", "category": "silent-exception", "subcategory": "swallowed-error",
+      "file": "elixir/lib/symphony_elixir/log_file.ex", "line": 0,
+      "title": "LogFile.remove_existing_handler/0 swallows handler removal errors",
+      "description": "Handler removal errors (except :not_found) are swallowed without logging.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z05-005", "severity": "high", "category": "error-handling", "subcategory": "missing-clause",
+      "file": "elixir/lib/symphony_elixir/ssh.ex", "line": 0,
+      "title": "SSH.start_port/3 missing error clause in with block",
+      "description": "If ssh_executable() fails, MatchError is thrown instead of returning error tuple.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-001", "severity": "critical", "category": "security", "subcategory": "csrf-bypass",
+      "file": "elixir/lib/symphony_elixir_web/router.ex", "line": 0,
+      "title": "POST API endpoints lack CSRF protection",
+      "description": "All POST routes are unprotected against cross-site request forgery. State-changing operations can be triggered by malicious third-party pages.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-002", "severity": "high", "category": "security", "subcategory": "weak-secret",
+      "file": "elixir/config/config.exs", "line": 0,
+      "title": "Weak hardcoded secret_key_base",
+      "description": "secret_key_base uses String.duplicate('s', 64) — trivially guessable. Should load from environment variable.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-003", "severity": "high", "category": "security", "subcategory": "origin-bypass",
+      "file": "elixir/config/config.exs", "line": 0,
+      "title": "check_origin: false disables WebSocket origin validation",
+      "description": "WebSocket connections accept any origin, enabling cross-site WebSocket hijacking.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-004", "severity": "medium", "category": "security", "subcategory": "weak-salt",
+      "file": "elixir/config/config.exs", "line": 0,
+      "title": "Hardcoded LiveView signing salt",
+      "description": "LiveView signing salt is hardcoded. Should load from environment variable.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-005", "severity": "high", "category": "security", "subcategory": "inline-js",
+      "file": "elixir/lib/symphony_elixir_web/live/dashboard_live.ex", "line": 0,
+      "title": "Inline onclick JavaScript handler in dashboard",
+      "description": "Dashboard uses inline onclick handler, bypassing CSP protections.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-006", "severity": "medium", "category": "infra", "subcategory": "missing-healthcheck",
+      "file": "elixir/test/support/live_e2e_docker/docker-compose.yml", "line": 0,
+      "title": "Docker containers missing healthchecks",
+      "description": "Worker services have no healthcheck configuration, preventing proper orchestration.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-007", "severity": "medium", "category": "infra", "subcategory": "missing-restart",
+      "file": "elixir/test/support/live_e2e_docker/docker-compose.yml", "line": 0,
+      "title": "Docker containers missing restart policy",
+      "description": "No restart policy defined; containers won't auto-recover from crashes.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-008", "severity": "high", "category": "security", "subcategory": "missing-auth",
+      "file": "elixir/lib/symphony_elixir_web/router.ex", "line": 0,
+      "title": "All API endpoints lack authorization checks",
+      "description": "Sensitive operations (refresh, routing changes, gate resolution) are accessible without any authentication.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-009", "severity": "high", "category": "error-handling", "subcategory": "uncaught-crash",
+      "file": "elixir/lib/symphony_elixir_web/controllers/observability_api_controller.ex", "line": 0,
+      "title": "Uncaught crashes from Config.settings!().duet calls",
+      "description": "Config.settings!() can raise, crashing the controller. Should use safe wrapper with error response.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z06-010", "severity": "low", "category": "infra", "subcategory": "unsafe-expansion",
+      "file": "elixir/Makefile", "line": 0,
+      "title": "Unquoted Makefile variable $(MIX)",
+      "description": "Unquoted variable could cause word splitting on paths with spaces.",
+      "fix_applied": false, "fix_commit": "", "confidence": "low", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-001", "severity": "medium", "category": "race-condition", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_branch_harness_test.exs", "line": 384,
+      "title": "Application.put_env without on_exit cleanup in runner/1 test",
+      "description": "Test uses Application.put_env but relied on after/1 block. Leaks state if test fails before after block.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-002", "severity": "high", "category": "race-condition", "subcategory": "shared-process-state",
+      "file": "elixir/test/symphony_elixir/duet_branch_harness_test.exs", "line": 28,
+      "title": "MockRunner uses Process.get/put without test isolation cleanup",
+      "description": "Process dictionary state can leak between tests without proper on_exit cleanup.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-003", "severity": "medium", "category": "logic-error", "subcategory": "weak-assertion",
+      "file": "elixir/test/symphony_elixir/duet_config_v04_test.exs", "line": 89,
+      "title": "Test writes workflow file but never verifies it was actually written",
+      "description": "No assertion that file exists after write_workflow_file! call.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-004", "severity": "high", "category": "race-condition", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_e2e_test.exs", "line": 130,
+      "title": "E2E test Application.put_env leakage in lifecycle test",
+      "description": "Application.put_env(:symphony_elixir, :memory_tracker_issues, ...) never cleaned up.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-005", "severity": "high", "category": "resource-leak", "subcategory": "process-cleanup",
+      "file": "elixir/test/symphony_elixir/duet_e2e_test.exs", "line": 133,
+      "title": "Agent.start_link cleanup ordering concern",
+      "description": "on_exit must be registered immediately after Agent.start_link to ensure cleanup.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-006", "severity": "medium", "category": "logic-error", "subcategory": "weak-assertion",
+      "file": "elixir/test/symphony_elixir/duet_event_log_test.exs", "line": 38,
+      "title": "EventLog test mock deps not fully verified",
+      "description": "Mock deps created but only one invocation verified; others may not be called correctly.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-007", "severity": "low", "category": "logic-error", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_gh_cli_test.exs", "line": 430,
+      "title": "Runner tests missing on_exit cleanup for Application env",
+      "description": "Application.put_env without on_exit cleanup in runner tests.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z07-008", "severity": "low", "category": "logic-error", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_gh_cli_test.exs", "line": 445,
+      "title": "Runner injection test missing on_exit cleanup",
+      "description": "Application.put_env without on_exit cleanup in injection test.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z08-001", "severity": "high", "category": "race-condition", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_notification_hook_test.exs", "line": 0,
+      "title": "Application.put_env without on_exit cleanup (18 instances across 16 test files)",
+      "description": "Tests across zone z08 set Application env without proper cleanup. 18 total instances of Application.put_env in test setup/body without corresponding on_exit cleanup, causing state leakage between tests and potential CI flakiness.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-001", "severity": "high", "category": "resource-leak", "subcategory": "env-leak",
+      "file": "elixir/test/symphony_elixir/duet_turn_driver_codex_app_server_test.exs", "line": 21,
+      "title": "DUET_CODEX_DRIVER_TRACE env var not restored after test",
+      "description": "Environment variable set during test but never restored to previous value.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-002", "severity": "medium", "category": "race-condition", "subcategory": "app-env-leak",
+      "file": "elixir/test/symphony_elixir/duet_turn_test.exs", "line": 13,
+      "title": "EventLog root not restored on cleanup causing test pollution",
+      "description": "Application env for event log root not cleaned up in on_exit.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-003", "severity": "medium", "category": "error-handling", "subcategory": "empty-list",
+      "file": "elixir/test/symphony_elixir/runner_selector_test.exs", "line": 15,
+      "title": "SequenceDriver doesn't handle empty agent list gracefully",
+      "description": "Agent.get_and_update crashes with FunctionClauseError on empty list. Fixed with try/rescue.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-004", "severity": "medium", "category": "race-condition", "subcategory": "flaky-timeout",
+      "file": "elixir/test/mix/tasks/workspace_before_remove_test.exs", "line": 385,
+      "title": "Receive timeout too low (1s) in capture_task_output causing CI flakes",
+      "description": "1-second timeout insufficient for CI environments; increased to 5s.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-005", "severity": "medium", "category": "race-condition", "subcategory": "flaky-timeout",
+      "file": "elixir/test/symphony_elixir/runner_selector_test.exs", "line": 141,
+      "title": "assert_receive timeouts too low (500ms) causing CI flakes",
+      "description": "Multiple assert_receive calls with 500ms timeout, insufficient for slow CI. 4 locations.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-006", "severity": "medium", "category": "race-condition", "subcategory": "flaky-timeout",
+      "file": "elixir/test/symphony_elixir/duet_turn_driver_codex_app_server_test.exs", "line": 85,
+      "title": "assert_receive timeouts too low (500ms)",
+      "description": "Two assert_receive calls with 500ms timeout, insufficient for CI.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z09-007", "severity": "low", "category": "other", "subcategory": "hardcoded-string",
+      "file": "elixir/test/support/snapshot_support.exs", "line": 7,
+      "title": "Hardcoded test filename in generic snapshot update hint",
+      "description": "Snapshot support references specific filename instead of generic message.",
+      "fix_applied": false, "fix_commit": "", "confidence": "low", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z10-001", "severity": "high", "category": "race-condition", "subcategory": "flaky-timeout",
+      "file": "elixir/test/symphony_elixir/app_server_test.exs", "line": 18,
+      "title": "Default 100ms assert_receive timeout insufficient for CI",
+      "description": "Default assert_receive timeout too low for CI environments.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z10-002", "severity": "high", "category": "resource-leak", "subcategory": "process-not-cleaned",
+      "file": "elixir/test/symphony_elixir/orchestrator_status_test.exs", "line": 9,
+      "title": "Missing on_exit cleanup for spawned process",
+      "description": "Process spawned in test setup not cleaned up, potentially leaking into other tests.",
+      "fix_applied": false, "fix_commit": "", "confidence": "high", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z10-003", "severity": "medium", "category": "logic-error", "subcategory": "weak-assertion",
+      "file": "elixir/test/symphony_elixir/dynamic_tool_test.exs", "line": 174,
+      "title": "Weak GraphQL error structure validation",
+      "description": "Test doesn't fully validate GraphQL error response structure.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z10-004", "severity": "medium", "category": "silent-exception", "subcategory": "incomplete-assertion",
+      "file": "elixir/test/symphony_elixir/app_server_test.exs", "line": 1194,
+      "title": "Incomplete stderr logging validation",
+      "description": "Test doesn't fully verify stderr logging behavior.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    },
+    {
+      "id": "r1-z10-005", "severity": "high", "category": "race-condition", "subcategory": "missing-timeout",
+      "file": "elixir/test/symphony_elixir/extensions_test.exs", "line": 112,
+      "title": "WorkflowStore polling without explicit timeout",
+      "description": "Polling loop lacks explicit timeout, could run indefinitely in test.",
+      "fix_applied": false, "fix_commit": "", "confidence": "medium", "verification_score": null, "verified": null
+    }
+  ],
+  "unverified_bugs": []
+}
